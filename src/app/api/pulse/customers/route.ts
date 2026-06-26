@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, readJson, sellerUrl } from "../backend";
+import { backendError, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendMember = {
   patient_id?: string | null;
@@ -38,6 +38,9 @@ function customerToView(customer: BackendCustomer) {
 }
 
 export async function GET(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
   const url = new URL(request.url);
   const params = new URLSearchParams({
     page: url.searchParams.get("page") ?? "1",
@@ -46,7 +49,7 @@ export async function GET(request: Request) {
   const query = url.searchParams.get("q")?.trim();
   if (query) params.set("q", query);
 
-  const response = await fetch(sellerUrl(`/customers?${params}`), {
+  const response = await fetch(sellerUrl(resolved.context.seller_id, `/customers?${params}`), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
@@ -66,6 +69,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
   const input = (await request.json().catch(() => null)) as {
     name?: unknown;
     email?: unknown;
@@ -84,7 +90,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "validation_error" }, { status: 400 });
   }
 
-  const response = await fetch(sellerUrl("/customers"), {
+  const response = await fetch(sellerUrl(resolved.context.seller_id, "/customers"), {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -116,7 +122,7 @@ export async function POST(request: Request) {
     limit: "10",
     page: "1",
   });
-  const lookupResponse = await fetch(sellerUrl(`/customers?${lookupParams}`), {
+  const lookupResponse = await fetch(sellerUrl(resolved.context.seller_id, `/customers?${lookupParams}`), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });

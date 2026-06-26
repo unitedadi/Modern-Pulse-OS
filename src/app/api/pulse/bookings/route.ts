@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, filsToAed, readJson, sellerUrl } from "../backend";
+import { backendError, filsToAed, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendBooking = {
   order_id?: string | null;
@@ -52,8 +52,11 @@ function bookingToView(booking: BackendBooking, index: number) {
   };
 }
 
-export async function GET() {
-  const response = await fetch(sellerUrl("/bookings?limit=50&page=1"), {
+export async function GET(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
+  const response = await fetch(sellerUrl(resolved.context.seller_id, "/bookings?limit=50&page=1"), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
@@ -71,4 +74,3 @@ export async function GET() {
   const bookings = (payload?.items ?? []).map(bookingToView);
   return NextResponse.json({ bookings, total: payload?.total ?? bookings.length });
 }
-

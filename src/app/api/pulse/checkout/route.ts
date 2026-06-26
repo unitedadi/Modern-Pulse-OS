@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SELLER_ID, backendError, backendUrl, readJson } from "../backend";
+import { backendError, backendUrl, readJson, resolvePartnerContext } from "../backend";
 
 type CheckoutProduct = {
   productId?: unknown;
@@ -29,6 +29,9 @@ function cartItem(product: CheckoutProduct) {
 }
 
 export async function POST(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
   const input = (await request.json().catch(() => null)) as
     | {
         customerId?: unknown;
@@ -49,6 +52,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "mixed_vertical_checkout_not_supported" }, { status: 400 });
   }
 
+  const sellerId = resolved.context.seller_id;
   const response = await fetch(backendUrl("/checkout/intents"), {
     method: "POST",
     headers: {
@@ -56,7 +60,7 @@ export async function POST(request: Request) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      seller_id: SELLER_ID,
+      seller_id: sellerId,
       platform: "b2b",
       customer_id: customerId,
       checkout_mode: "ASSISTED_CHECKOUT",
@@ -71,7 +75,8 @@ export async function POST(request: Request) {
       },
       metadata: {
         source: "pulse_os",
-        seller_id: SELLER_ID,
+        seller_id: sellerId,
+        b2b_partner_name: resolved.context.seller?.display_name ?? sellerId,
       },
     }),
   });

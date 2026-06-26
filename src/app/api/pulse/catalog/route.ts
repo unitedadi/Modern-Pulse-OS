@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, filsToAed, readJson, sellerUrl } from "../backend";
+import { backendError, filsToAed, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendProduct = {
   product_id: string;
@@ -123,8 +123,11 @@ function ivProduct(product: BackendProduct) {
   };
 }
 
-export async function GET() {
-  const response = await fetch(sellerUrl("/catalog"), {
+export async function GET(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
+  const response = await fetch(sellerUrl(resolved.context.seller_id, "/catalog"), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, filsToAed, readJson, sellerUrl } from "../backend";
+import { backendError, filsToAed, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendLedgerEntry = {
   order_id?: string | null;
@@ -48,8 +48,11 @@ function entryToView(entry: BackendLedgerEntry, index: number) {
   };
 }
 
-export async function GET() {
-  const response = await fetch(sellerUrl("/ledger?limit=50&page=1"), {
+export async function GET(request: Request) {
+  const resolved = await resolvePartnerContext(request);
+  if ("response" in resolved) return resolved.response;
+
+  const response = await fetch(sellerUrl(resolved.context.seller_id, "/ledger?limit=50&page=1"), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
@@ -80,4 +83,3 @@ export async function GET() {
     },
   });
 }
-

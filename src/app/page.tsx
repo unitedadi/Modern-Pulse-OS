@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useAuth } from "@clerk/nextjs";
 import {
   AlertTriangle,
   CalendarDays,
@@ -72,6 +73,15 @@ type Modal = "newCustomer" | "order" | null;
 type LedgerTotals = {
   paidAed: number;
   commissionAed: number;
+};
+
+type PartnerContext = {
+  seller_id: string;
+  customer_id: string;
+  seller?: {
+    display_name?: string | null;
+  };
+  resolved_by?: string | null;
 };
 
 const labProducts: Product[] = [
@@ -184,6 +194,7 @@ function initials(name: string) {
 }
 
 export default function Home() {
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [view, setView] = useState<View>("customers");
   const [modal, setModal] = useState<Modal>(null);
   const [search, setSearch] = useState("");
@@ -195,6 +206,7 @@ export default function Home() {
     paidAed: 0,
     commissionAed: 0,
   });
+  const [partnerContext, setPartnerContext] = useState<PartnerContext | null>(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -215,9 +227,22 @@ export default function Home() {
   const [cart, setCart] = useState<Product[]>([]);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
 
+  const authHeaders = useCallback(async (contentType?: string) => {
+    const token = await getToken();
+    if (!token) throw new Error("missing_clerk_token");
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+    };
+    if (contentType) headers["Content-Type"] = contentType;
+    return headers;
+  }, [getToken]);
+
   const refreshBookings = useCallback(async () => {
     try {
-      const response = await fetch("/api/pulse/bookings", { cache: "no-store" });
+      const response = await fetch("/api/pulse/bookings", {
+        cache: "no-store",
+        headers: await authHeaders(),
+      });
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? `bookings_${response.status}`);
@@ -227,11 +252,14 @@ export default function Home() {
     } catch (error) {
       setLiveError(error instanceof Error ? error.message : "bookings_refresh_failed");
     }
-  }, []);
+  }, [authHeaders]);
 
   const refreshLedger = useCallback(async () => {
     try {
-      const response = await fetch("/api/pulse/ledger", { cache: "no-store" });
+      const response = await fetch("/api/pulse/ledger", {
+        cache: "no-store",
+        headers: await authHeaders(),
+      });
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? `ledger_${response.status}`);
@@ -242,25 +270,31 @@ export default function Home() {
     } catch (error) {
       setLiveError(error instanceof Error ? error.message : "ledger_refresh_failed");
     }
-  }, []);
+  }, [authHeaders]);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) return;
+
     let cancelled = false;
 
     async function loadPulseData() {
       setLiveLoading(true);
       setLiveError("");
       try {
-        const [customersResponse, catalogResponse, bookingsResponse, ledgerResponse] =
+        const headers = await authHeaders();
+        const [contextResponse, customersResponse, catalogResponse, bookingsResponse, ledgerResponse] =
           await Promise.all([
-            fetch("/api/pulse/customers", { cache: "no-store" }),
-            fetch("/api/pulse/catalog", { cache: "no-store" }),
-            fetch("/api/pulse/bookings", { cache: "no-store" }),
-            fetch("/api/pulse/ledger", { cache: "no-store" }),
+            fetch("/api/pulse/context", { cache: "no-store", headers }),
+            fetch("/api/pulse/customers", { cache: "no-store", headers }),
+            fetch("/api/pulse/catalog", { cache: "no-store", headers }),
+            fetch("/api/pulse/bookings", { cache: "no-store", headers }),
+            fetch("/api/pulse/ledger", { cache: "no-store", headers }),
           ]);
 
-        const [customersPayload, catalogPayload, bookingsPayload, ledgerPayload] =
+        const [contextPayload, customersPayload, catalogPayload, bookingsPayload, ledgerPayload] =
           await Promise.all([
+            contextResponse.json(),
             customersResponse.json(),
             catalogResponse.json(),
             bookingsResponse.json(),
@@ -268,6 +302,7 @@ export default function Home() {
           ]);
 
         const failed = [
+          contextResponse,
           customersResponse,
           catalogResponse,
           bookingsResponse,
@@ -276,7 +311,8 @@ export default function Home() {
 
         if (failed) {
           throw new Error(
-            customersPayload.error ??
+            contextPayload.error ??
+              customersPayload.error ??
               catalogPayload.error ??
               bookingsPayload.error ??
               ledgerPayload.error ??
@@ -285,6 +321,7 @@ export default function Home() {
         }
 
         if (cancelled) return;
+        setPartnerContext(contextPayload);
         setCustomers(customersPayload.customers ?? []);
         setLiveLabProducts(catalogPayload.labProducts ?? []);
         setLiveIvProducts(catalogPayload.ivProducts ?? []);
@@ -302,7 +339,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authHeaders, isLoaded, isSignedIn]);
 
   useEffect(() => {
     function refreshVisibleSellerData() {
@@ -372,7 +409,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/pulse/customers", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders("application/json"),
         body: JSON.stringify(newCustomer),
       });
       const payload = await response.json();
@@ -420,7 +457,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/pulse/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders("application/json"),
         body: JSON.stringify({
           customerId: orderCustomer.customerId ?? orderCustomer.id,
           products: cart.map((item) => ({
@@ -461,9 +498,10 @@ export default function Home() {
     setBookings((current) => [booking, ...current]);
     setView("bookings");
     closeModal();
-    flash('Peptide consult booked and tagged "Dev Seller".');
+    flash(`Peptide consult booked and tagged "${sellerName}".`);
   }
 
+  const sellerName = partnerContext?.seller?.display_name || partnerContext?.seller_id || "Pulse OS";
   const showLab = orderTab === "lab";
   const showIv = orderTab === "iv";
   const showPeptides = orderTab === "peptides";
@@ -477,7 +515,7 @@ export default function Home() {
 
   return (
     <main className="pls-app">
-      <Sidebar activeView={view} onChange={changeView} />
+      <Sidebar activeView={view} sellerName={sellerName} onChange={changeView} />
 
       <section className="pls-main">
         {view === "customers" && (
@@ -558,6 +596,7 @@ export default function Home() {
           }
           onConfirm={confirmOrder}
           isConfirming={openingCheckout}
+          sellerName={sellerName}
           onBookConsult={bookConsult}
         />
       )}
@@ -595,9 +634,11 @@ export default function Home() {
 
 function Sidebar({
   activeView,
+  sellerName,
   onChange,
 }: {
   activeView: View;
+  sellerName: string;
   onChange: (view: View) => void;
 }) {
   return (
@@ -635,9 +676,9 @@ function Sidebar({
       </nav>
 
       <div className="pls-seller">
-        <div className="pls-avatar">WC</div>
+        <div className="pls-avatar">{initials(sellerName) || "P"}</div>
         <div className="pls-seller-text">
-          <div className="pls-seller-name">Dev Seller</div>
+          <div className="pls-seller-name">{sellerName}</div>
           <div className="pls-seller-sub">Lab | IV | Peptides</div>
         </div>
       </div>
@@ -1035,6 +1076,7 @@ function OrderModal({
   onRemove,
   onConfirm,
   isConfirming,
+  sellerName,
   onBookConsult,
 }: {
   customer: Customer;
@@ -1057,6 +1099,7 @@ function OrderModal({
   onRemove: (index: number) => void;
   onConfirm: () => void;
   isConfirming: boolean;
+  sellerName: string;
   onBookConsult: () => void;
 }) {
   const query = search.trim().toLowerCase();
@@ -1160,7 +1203,7 @@ function OrderModal({
                   </p>
                   <span>
                     <Tag size={13} />
-                    Tag: Dev Seller
+                    Tag: {sellerName}
                   </span>
                 </div>
                 <button onClick={onBookConsult}>Book consultation</button>
