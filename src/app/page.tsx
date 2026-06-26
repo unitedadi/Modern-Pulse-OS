@@ -33,6 +33,7 @@ type Customer = {
 
 type Booking = {
   id: string;
+  type?: "booking" | "peptide_consultation" | "peptide_medication_order" | string;
   customer: string;
   service: string;
   vertical: "Lab" | "IV" | "Peptides";

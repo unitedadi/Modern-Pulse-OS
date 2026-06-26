@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { backendError, filsToAed, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendBooking = {
+  type?: string | null;
   order_id?: string | null;
   booking_id?: string | null;
   customer_name?: string | null;
@@ -35,16 +36,23 @@ function vertical(value: string | null | undefined) {
 function status(value: string | null | undefined) {
   const normalized = String(value ?? "").toUpperCase();
   if (["FULFILLED", "COMPLETED", "COMPLETE", "PAID"].includes(normalized)) return "Completed";
-  if (["CONFIRMED", "BOOKED", "ACTIVE", "ASSIGNED"].includes(normalized)) return "Confirmed";
+  if (["CONFIRMED", "BOOKED", "ACTIVE", "ASSIGNED", "SCHEDULED"].includes(normalized)) return "Confirmed";
   return "Pending";
+}
+
+function serviceName(booking: BackendBooking) {
+  if (booking.type === "peptide_consultation") return "Peptide consultation";
+  if (booking.type === "peptide_medication_order") return booking.product_name ?? "Peptide medication";
+  return booking.product_name ?? "Service";
 }
 
 function bookingToView(booking: BackendBooking, index: number) {
   const amount = filsToAed(booking.amount_fils);
   return {
     id: booking.booking_id ?? booking.order_id ?? String(index),
+    type: booking.type ?? "booking",
     customer: booking.customer_name ?? "Customer",
-    service: booking.product_name ?? "Service",
+    service: serviceName(booking),
     vertical: vertical(booking.vertical),
     date: formatDate(booking.occurred_at ?? booking.paid_at),
     status: status(booking.status),
