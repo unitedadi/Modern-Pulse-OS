@@ -29,7 +29,7 @@ type CustomerCreatePayload = {
 };
 
 function gender(value: unknown) {
-  return value === "Male" ? "Male" : "Female";
+  return String(value ?? "").trim().toLowerCase() === "male" ? "Male" : "Female";
 }
 
 function customerToView(customer: BackendCustomer) {
