@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const API_BASE = (process.env.PULSE_API_BASE_URL ?? "http://127.0.0.1:4011").replace(/\/$/, "");
+const API_BASE = (process.env.PULSE_API_BASE_URL ?? "https://api-prod.dardoc.com").replace(/\/$/, "");
 
 export type PulsePartnerContext = {
   seller_id: string;
