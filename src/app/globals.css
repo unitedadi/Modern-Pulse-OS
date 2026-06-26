@@ -549,6 +549,12 @@ input:focus {
   color: var(--dd-text-secondary);
 }
 
+.pls-settings-stack,
+.pls-address-form {
+  display: grid;
+  gap: 16px;
+}
+
 .pls-premise-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -572,6 +578,32 @@ input:focus {
   color: #fff;
   background: var(--dd-accent);
   border-color: var(--dd-accent);
+}
+
+.pls-settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.pls-settings-field > span,
+.pls-settings-note {
+  font-size: 12px;
+  color: var(--dd-text-secondary);
+}
+
+.pls-settings-note {
+  margin: 0;
+}
+
+.pls-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.pls-settings-actions .pls-primary-wide {
+  width: auto;
+  min-width: 190px;
 }
 
 .pls-overlay {

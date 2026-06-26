@@ -28,6 +28,27 @@ type CustomerCreatePayload = {
   detail?: string;
 };
 
+type PremiseAddress = {
+  saved_name?: string | null;
+  line1?: string | null;
+  address?: string | null;
+  building_name?: string | null;
+  floor_number?: string | null;
+  line2?: string | null;
+  detail?: string | null;
+  area?: string | null;
+  city?: string | null;
+  emirate?: string | null;
+  country?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+};
+
+type PulseProfile = {
+  serves_on_premise?: boolean;
+  premise_address?: PremiseAddress | null;
+};
+
 function gender(value: unknown) {
   return String(value ?? "").trim().toLowerCase() === "male" ? "Male" : "Female";
 }
@@ -74,6 +95,19 @@ async function hydrateSellerCustomer(sellerId: string, customerId: string) {
   return lookupPayload?.items?.find((customer) => customer.customer_id === customerId) ?? null;
 }
 
+async function loadPulseProfile(sellerId: string) {
+  const response = await fetch(sellerUrl(sellerId, ""), {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  const payload = (await readJson(response)) as
+    | { pulse_profile?: PulseProfile; error?: string; detail?: string }
+    | null;
+
+  if (!response.ok) return null;
+  return payload?.pulse_profile ?? null;
+}
+
 async function createInitialMember(params: {
   customerId: string;
   name: string;
@@ -105,6 +139,37 @@ async function createInitialMember(params: {
   }
 
   return payload.patient;
+}
+
+async function createPremiseAddress(customerId: string, address: PremiseAddress) {
+  const response = await fetch(backendUrl(`/customers/${encodeURIComponent(customerId)}/addresses`), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      saved_name: address.saved_name ?? "Premise",
+      line1: address.line1 ?? address.address,
+      building_name: address.building_name ?? undefined,
+      floor_number: address.floor_number ?? undefined,
+      line2: address.line2 ?? address.detail ?? undefined,
+      detail: address.detail ?? address.line2 ?? undefined,
+      area: address.area ?? undefined,
+      city: address.city ?? undefined,
+      emirate: address.emirate ?? undefined,
+      country: address.country ?? "UAE",
+      latitude: address.latitude ?? undefined,
+      longitude: address.longitude ?? undefined,
+    }),
+  });
+  const payload = (await readJson(response)) as
+    | { address?: unknown; error?: string; detail?: string }
+    | null;
+
+  if (!response.ok || !payload?.address) {
+    throw new Error(backendError(payload, `address_create_${response.status}`));
+  }
 }
 
 export async function GET(request: Request) {
@@ -202,6 +267,10 @@ export async function POST(request: Request) {
         age,
         gender: genderValue,
       });
+      const pulseProfile = await loadPulseProfile(resolved.context.seller_id);
+      if (pulseProfile?.serves_on_premise && pulseProfile.premise_address) {
+        await createPremiseAddress(customerId, pulseProfile.premise_address);
+      }
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "member_create_failed" },

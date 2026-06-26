@@ -100,6 +100,20 @@ type LedgerTotals = {
   commissionAed: number;
 };
 
+type PremiseAddress = {
+  saved_name: string;
+  line1: string;
+  building_name: string;
+  floor_number: string;
+  line2: string;
+  area: string;
+  city: string;
+  emirate: string;
+  country: string;
+  latitude: string;
+  longitude: string;
+};
+
 type PartnerContext = {
   seller_id: string;
   customer_id: string;
@@ -107,6 +121,19 @@ type PartnerContext = {
     display_name?: string | null;
   };
   resolved_by?: string | null;
+};
+
+type PulseSettingsPayload = {
+  pulseProfile?: {
+    serves_on_premise?: boolean;
+    premise_address?:
+      | (Partial<PremiseAddress> & {
+          address?: string | null;
+          detail?: string | null;
+        })
+      | null;
+  };
+  error?: string;
 };
 
 const labProducts: Product[] = [
@@ -209,6 +236,20 @@ const ivProducts: Product[] = [
   },
 ];
 
+const emptyPremiseAddress: PremiseAddress = {
+  saved_name: "Premise",
+  line1: "",
+  building_name: "",
+  floor_number: "",
+  line2: "",
+  area: "",
+  city: "Dubai",
+  emirate: "Dubai",
+  country: "UAE",
+  latitude: "",
+  longitude: "",
+};
+
 function initials(name: string) {
   return name
     .split(" ")
@@ -250,6 +291,48 @@ function formatSlotDate(value: string) {
   }).format(date);
 }
 
+function normalizePremiseAddress(
+  value:
+    | (Partial<PremiseAddress> & {
+        address?: string | null;
+        detail?: string | null;
+      })
+    | null
+    | undefined,
+): PremiseAddress {
+  if (!value) return emptyPremiseAddress;
+  return {
+    saved_name: String(value.saved_name ?? emptyPremiseAddress.saved_name),
+    line1: String(value.line1 ?? value.address ?? ""),
+    building_name: String(value.building_name ?? ""),
+    floor_number: String(value.floor_number ?? ""),
+    line2: String(value.line2 ?? value.detail ?? ""),
+    area: String(value.area ?? ""),
+    city: String(value.city ?? emptyPremiseAddress.city),
+    emirate: String(value.emirate ?? emptyPremiseAddress.emirate),
+    country: String(value.country ?? emptyPremiseAddress.country),
+    latitude: String(value.latitude ?? ""),
+    longitude: String(value.longitude ?? ""),
+  };
+}
+
+function validatePremiseAddress(address: PremiseAddress) {
+  if (!address.line1.trim()) return "Address line is required.";
+  if (!address.area.trim()) return "Area is required.";
+  if (!address.city.trim()) return "City is required.";
+  if (!address.emirate.trim()) return "Emirate is required.";
+  if (!address.country.trim()) return "Country is required.";
+  const latitude = Number(address.latitude);
+  const longitude = Number(address.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    return "Enter a valid latitude.";
+  }
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return "Enter a valid longitude.";
+  }
+  return "";
+}
+
 export default function Home() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { signOut } = useClerk();
@@ -273,6 +356,8 @@ export default function Home() {
   const [liveLabProducts, setLiveLabProducts] = useState<Product[]>([]);
   const [liveIvProducts, setLiveIvProducts] = useState<Product[]>([]);
   const [servesPremise, setServesPremise] = useState(true);
+  const [premiseAddress, setPremiseAddress] = useState<PremiseAddress>(emptyPremiseAddress);
+  const [savingSettings, setSavingSettings] = useState(false);
   const [newCustomer, setNewCustomer] = useState({
     name: "",
     email: "",
@@ -348,22 +433,38 @@ export default function Home() {
       setLiveError("");
       try {
         const headers = await authHeaders();
-        const [contextResponse, customersResponse, catalogResponse, bookingsResponse, ledgerResponse] =
+        const [
+          contextResponse,
+          customersResponse,
+          catalogResponse,
+          bookingsResponse,
+          ledgerResponse,
+          settingsResponse,
+        ] =
           await Promise.all([
             fetch("/api/pulse/context", { cache: "no-store", headers }),
             fetch("/api/pulse/customers", { cache: "no-store", headers }),
             fetch("/api/pulse/catalog", { cache: "no-store", headers }),
             fetch("/api/pulse/bookings", { cache: "no-store", headers }),
             fetch("/api/pulse/ledger", { cache: "no-store", headers }),
+            fetch("/api/pulse/settings", { cache: "no-store", headers }),
           ]);
 
-        const [contextPayload, customersPayload, catalogPayload, bookingsPayload, ledgerPayload] =
+        const [
+          contextPayload,
+          customersPayload,
+          catalogPayload,
+          bookingsPayload,
+          ledgerPayload,
+          settingsPayload,
+        ] =
           await Promise.all([
             contextResponse.json(),
             customersResponse.json(),
             catalogResponse.json(),
             bookingsResponse.json(),
             ledgerResponse.json(),
+            settingsResponse.json() as Promise<PulseSettingsPayload>,
           ]);
 
         const failed = [
@@ -372,6 +473,7 @@ export default function Home() {
           catalogResponse,
           bookingsResponse,
           ledgerResponse,
+          settingsResponse,
         ].find((response) => !response.ok);
 
         if (failed) {
@@ -381,6 +483,7 @@ export default function Home() {
               catalogPayload.error ??
               bookingsPayload.error ??
               ledgerPayload.error ??
+              settingsPayload.error ??
               `pulse_api_${failed.status}`,
           );
         }
@@ -393,6 +496,8 @@ export default function Home() {
         setBookings(bookingsPayload.bookings ?? []);
         setLedger(ledgerPayload.ledger ?? []);
         setLedgerTotals(ledgerPayload.totals ?? { paidAed: 0, commissionAed: 0 });
+        setServesPremise(Boolean(settingsPayload.pulseProfile?.serves_on_premise));
+        setPremiseAddress(normalizePremiseAddress(settingsPayload.pulseProfile?.premise_address));
       } catch (error) {
         if (!cancelled) setLiveError(error instanceof Error ? error.message : "pulse_api_failed");
       } finally {
@@ -489,6 +594,38 @@ export default function Home() {
     }
     if (nextView === "revenue") {
       void refreshLedger();
+    }
+  }
+
+  async function saveSettings() {
+    if (savingSettings) return;
+    const validationError = servesPremise ? validatePremiseAddress(premiseAddress) : "";
+    if (validationError) {
+      flash(validationError);
+      return;
+    }
+
+    setSavingSettings(true);
+    try {
+      const response = await fetch("/api/pulse/settings", {
+        method: "PATCH",
+        headers: await authHeaders("application/json"),
+        body: JSON.stringify({
+          serves_on_premise: servesPremise,
+          premise_address: servesPremise ? premiseAddress : null,
+        }),
+      });
+      const payload = (await response.json()) as PulseSettingsPayload;
+      if (!response.ok || !payload.pulseProfile) {
+        throw new Error(payload.error ?? `settings_save_${response.status}`);
+      }
+      setServesPremise(Boolean(payload.pulseProfile.serves_on_premise));
+      setPremiseAddress(normalizePremiseAddress(payload.pulseProfile.premise_address));
+      flash("Premise address saved.");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Settings save failed.");
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -710,7 +847,11 @@ export default function Home() {
         {view === "settings" && (
           <SettingsView
             servesPremise={servesPremise}
+            premiseAddress={premiseAddress}
+            saving={savingSettings}
             onServesPremise={setServesPremise}
+            onPremiseAddress={setPremiseAddress}
+            onSave={saveSettings}
           />
         )}
       </section>
@@ -1116,44 +1257,178 @@ function MetricCard({
 
 function SettingsView({
   servesPremise,
+  premiseAddress,
+  saving,
   onServesPremise,
+  onPremiseAddress,
+  onSave,
 }: {
   servesPremise: boolean;
+  premiseAddress: PremiseAddress;
+  saving: boolean;
   onServesPremise: (value: boolean) => void;
+  onPremiseAddress: (value: PremiseAddress) => void;
+  onSave: () => void;
 }) {
+  const updateAddress = (patch: Partial<PremiseAddress>) => {
+    onPremiseAddress({ ...premiseAddress, ...patch });
+  };
+
   return (
     <>
       <h1>Settings</h1>
       <p className="pls-page-copy">
-        Placeholder partner settings for the future real backend contract.
+        Manage how Pulse creates members and visit addresses for this seller.
       </p>
 
       <section className="pls-settings-card">
         <div>
           <h2>Premise address</h2>
           <p>
-            Choose whether new members receive the partner premise address by
-            default.
+            Save the location used when new customers and members are created from Pulse.
           </p>
         </div>
-        <div className="pls-premise-grid">
-          <button
-            className={`pls-premise ${servesPremise ? "active" : ""}`}
-            onClick={() => onServesPremise(true)}
-          >
-            Serves on premise
-            {servesPremise && <Check size={18} />}
-          </button>
-          <button
-            className={`pls-premise ${!servesPremise ? "active" : ""}`}
-            onClick={() => onServesPremise(false)}
-          >
-            Home visit only
-            {!servesPremise && <Check size={18} />}
-          </button>
+        <div className="pls-settings-stack">
+          <div className="pls-premise-grid">
+            <button
+              type="button"
+              className={`pls-premise ${servesPremise ? "active" : ""}`}
+              onClick={() => onServesPremise(true)}
+            >
+              Serves on premise
+              {servesPremise && <Check size={18} />}
+            </button>
+            <button
+              type="button"
+              className={`pls-premise ${!servesPremise ? "active" : ""}`}
+              onClick={() => onServesPremise(false)}
+            >
+              Home visit only
+              {!servesPremise && <Check size={18} />}
+            </button>
+          </div>
+
+          {servesPremise && (
+            <div className="pls-address-form">
+              <div className="pls-form-grid">
+                <SettingsField
+                  label="Label"
+                  value={premiseAddress.saved_name}
+                  placeholder="Clinic, Gym, Studio"
+                  onChange={(value) => updateAddress({ saved_name: value })}
+                />
+                <SettingsField
+                  label="Building"
+                  value={premiseAddress.building_name}
+                  placeholder="Building or venue"
+                  onChange={(value) => updateAddress({ building_name: value })}
+                />
+              </div>
+              <SettingsField
+                label="Address line"
+                value={premiseAddress.line1}
+                placeholder="Street, tower, villa, or venue address"
+                onChange={(value) => updateAddress({ line1: value })}
+              />
+              <div className="pls-form-grid">
+                <SettingsField
+                  label="Floor / unit"
+                  value={premiseAddress.floor_number}
+                  placeholder="Floor 12, Unit 1204"
+                  onChange={(value) => updateAddress({ floor_number: value })}
+                />
+                <SettingsField
+                  label="Details"
+                  value={premiseAddress.line2}
+                  placeholder="Reception, landmark, parking"
+                  onChange={(value) => updateAddress({ line2: value })}
+                />
+              </div>
+              <div className="pls-form-grid">
+                <SettingsField
+                  label="Area"
+                  value={premiseAddress.area}
+                  placeholder="Dubai Marina"
+                  onChange={(value) => updateAddress({ area: value })}
+                />
+                <SettingsField
+                  label="City"
+                  value={premiseAddress.city}
+                  placeholder="Dubai"
+                  onChange={(value) => updateAddress({ city: value })}
+                />
+              </div>
+              <div className="pls-form-grid">
+                <SettingsField
+                  label="Emirate"
+                  value={premiseAddress.emirate}
+                  placeholder="Dubai"
+                  onChange={(value) => updateAddress({ emirate: value })}
+                />
+                <SettingsField
+                  label="Country"
+                  value={premiseAddress.country}
+                  placeholder="UAE"
+                  onChange={(value) => updateAddress({ country: value })}
+                />
+              </div>
+              <div className="pls-form-grid">
+                <SettingsField
+                  label="Latitude"
+                  value={premiseAddress.latitude}
+                  placeholder="25.2048"
+                  inputMode="decimal"
+                  onChange={(value) => updateAddress({ latitude: value })}
+                />
+                <SettingsField
+                  label="Longitude"
+                  value={premiseAddress.longitude}
+                  placeholder="55.2708"
+                  inputMode="decimal"
+                  onChange={(value) => updateAddress({ longitude: value })}
+                />
+              </div>
+              <p className="pls-settings-note">
+                Coordinates are required so checkout can validate serviceability and show slots.
+              </p>
+            </div>
+          )}
+
+          <div className="pls-settings-actions">
+            <button type="button" className="pls-primary-wide" onClick={onSave} disabled={saving}>
+              {saving ? "Saving..." : "Save settings"}
+            </button>
+          </div>
         </div>
       </section>
     </>
+  );
+}
+
+function SettingsField({
+  label,
+  value,
+  placeholder,
+  inputMode,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  inputMode?: "text" | "decimal";
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="pls-settings-field">
+      <span>{label}</span>
+      <input
+        className="pls-input"
+        inputMode={inputMode}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
 }
 
