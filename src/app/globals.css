@@ -876,7 +876,7 @@ input:focus {
   border-radius: 0;
 }
 
-.pls-peptide div {
+.pls-peptide > div {
   flex: 1;
   min-width: 240px;
 }
@@ -895,7 +895,7 @@ input:focus {
   color: var(--dd-text-secondary);
 }
 
-.pls-peptide span {
+.pls-peptide > div > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -907,7 +907,7 @@ input:focus {
   border-radius: 0;
 }
 
-.pls-peptide button {
+.pls-peptide-book {
   flex: none;
   padding: 0;
   font-weight: 400;
@@ -916,6 +916,69 @@ input:focus {
   background: transparent;
   border: 0;
   border-radius: 0;
+}
+
+.pls-peptide-book:disabled {
+  color: var(--dd-text-tertiary);
+  cursor: not-allowed;
+}
+
+.pls-peptide-status,
+.pls-peptide-error {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.pls-peptide-error {
+  color: #a64242;
+}
+
+.pls-peptide-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--dd-divider);
+  border-bottom: 1px solid var(--dd-divider);
+}
+
+.pls-peptide-slots button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 12px;
+  color: var(--dd-text-primary);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--dd-divider);
+}
+
+.pls-peptide-slots button:nth-child(odd) {
+  border-right: 1px solid var(--dd-divider);
+}
+
+.pls-peptide-slots button:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.pls-peptide-slots button.active {
+  color: var(--dd-accent);
+  background: rgba(20, 73, 75, 0.04);
+}
+
+.pls-peptide-slots span {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.pls-peptide-slots small {
+  font-size: 12px;
+  color: var(--dd-text-secondary);
 }
 
 .pls-cart {
@@ -1350,6 +1413,23 @@ input:focus {
     flex-direction: column;
   }
 
+  .pls-peptide-slots {
+    grid-template-columns: 1fr;
+  }
+
+  .pls-peptide-slots button,
+  .pls-peptide-slots button:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .pls-peptide-slots button:nth-last-child(-n + 2) {
+    border-bottom: 1px solid var(--dd-divider);
+  }
+
+  .pls-peptide-slots button:last-child {
+    border-bottom: 0;
+  }
+
   .pls-detail-body,
   .pls-detail-footer {
     padding-right: 22px;
@@ -1380,7 +1460,7 @@ input:focus {
 
   .pls-product-buy,
   .pls-product-buy button,
-  .pls-peptide button,
+  .pls-peptide-book,
   .pls-cart-footer .pls-cta,
   .pls-detail-footer .pls-cta {
     width: 100%;

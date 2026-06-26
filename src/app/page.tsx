@@ -68,6 +68,28 @@ type Product = {
   ingredients?: Array<{ name: string; desc: string }>;
 };
 
+type PeptideConsultSlot = {
+  slot_start: string;
+  slot_end?: string | null;
+  status?: string | null;
+  doctor_id?: string | null;
+};
+
+type PeptideConsultBooking = {
+  consultation?: {
+    consultation_id?: string;
+    status?: string;
+    scheduled_start_at?: string;
+    slot_start_ts?: string;
+  };
+  lead?: {
+    lead_id?: string;
+    source_tag?: string | null;
+    b2b_partner_id?: string | null;
+    b2b_partner_name?: string | null;
+  };
+};
+
 type Modal = "newCustomer" | "order" | null;
 
 type LedgerTotals = {
@@ -193,6 +215,27 @@ function initials(name: string) {
     .toUpperCase();
 }
 
+function formatSlotDay(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Available";
+  return new Intl.DateTimeFormat("en-AE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Dubai",
+  }).format(date);
+}
+
+function formatSlotTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-AE", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Dubai",
+  }).format(date);
+}
+
 export default function Home() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [view, setView] = useState<View>("customers");
@@ -226,6 +269,12 @@ export default function Home() {
   const [orderSearch, setOrderSearch] = useState("");
   const [cart, setCart] = useState<Product[]>([]);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  const [peptideSlots, setPeptideSlots] = useState<PeptideConsultSlot[]>([]);
+  const [selectedPeptideSlot, setSelectedPeptideSlot] = useState<PeptideConsultSlot | null>(null);
+  const [peptideSlotsLoading, setPeptideSlotsLoading] = useState(false);
+  const [peptideSlotsError, setPeptideSlotsError] = useState("");
+  const [peptideBooking, setPeptideBooking] = useState<PeptideConsultBooking | null>(null);
+  const [bookingPeptideConsult, setBookingPeptideConsult] = useState(false);
 
   const authHeaders = useCallback(async (contentType?: string) => {
     const token = await getToken();
@@ -359,6 +408,49 @@ export default function Home() {
     };
   }, [refreshBookings, refreshLedger, view]);
 
+  useEffect(() => {
+    if (modal !== "order" || orderTab !== "peptides" || !orderCustomer) {
+      return;
+    }
+
+    let cancelled = false;
+    async function loadPeptideSlots() {
+      setPeptideSlotsLoading(true);
+      setPeptideSlotsError("");
+      setSelectedPeptideSlot(null);
+      setPeptideBooking(null);
+      try {
+        const response = await fetch("/api/pulse/peptide-consult", {
+          cache: "no-store",
+          headers: await authHeaders(),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? `peptide_slots_${response.status}`);
+        }
+        if (cancelled) return;
+        const slots = (payload.slots ?? []) as PeptideConsultSlot[];
+        const availableSlots = slots.filter(
+          (slot) => String(slot.status ?? "").toUpperCase() !== "BOOKED" && slot.slot_start,
+        );
+        setPeptideSlots(availableSlots);
+        setSelectedPeptideSlot(availableSlots[0] ?? null);
+      } catch (error) {
+        if (!cancelled) {
+          setPeptideSlots([]);
+          setPeptideSlotsError(error instanceof Error ? error.message : "peptide_slots_failed");
+        }
+      } finally {
+        if (!cancelled) setPeptideSlotsLoading(false);
+      }
+    }
+
+    void loadPeptideSlots();
+    return () => {
+      cancelled = true;
+    };
+  }, [authHeaders, modal, orderCustomer, orderTab]);
+
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return customers;
@@ -384,12 +476,21 @@ export default function Home() {
     }
   }
 
+  function resetPeptideConsult() {
+    setPeptideSlots([]);
+    setSelectedPeptideSlot(null);
+    setPeptideSlotsError("");
+    setPeptideSlotsLoading(false);
+    setPeptideBooking(null);
+  }
+
   function closeModal() {
     setModal(null);
     setCart([]);
     setOrderCustomer(null);
     setOrderTab("lab");
     setOrderSearch("");
+    resetPeptideConsult();
   }
 
   function openNewCustomer() {
@@ -438,6 +539,7 @@ export default function Home() {
   }
 
   function startOrder(customer: Customer) {
+    resetPeptideConsult();
     setOrderCustomer(customer);
     setOrderTab("lab");
     setOrderSearch("");
@@ -484,21 +586,49 @@ export default function Home() {
     }
   }
 
-  function bookConsult() {
-    if (!orderCustomer) return;
-    const booking: Booking = {
-      id: String(Date.now()),
-      customer: orderCustomer.name,
-      service: "Peptide consultation, Dr. Marwa",
-      vertical: "Peptides",
-      date: "Next available",
-      status: "Confirmed",
-      amount: "Consult",
-    };
-    setBookings((current) => [booking, ...current]);
-    setView("bookings");
-    closeModal();
-    flash(`Peptide consult booked and tagged "${sellerName}".`);
+  async function bookConsult() {
+    if (!orderCustomer || !selectedPeptideSlot || bookingPeptideConsult) return;
+    const doctorId = selectedPeptideSlot.doctor_id;
+    if (!doctorId) {
+      flash("peptide_doctor_missing");
+      return;
+    }
+    if (!orderCustomer.phone) {
+      flash("Customer phone is required for peptide consults.");
+      return;
+    }
+
+    setBookingPeptideConsult(true);
+    try {
+      const response = await fetch("/api/pulse/peptide-consult", {
+        method: "POST",
+        headers: await authHeaders("application/json"),
+        body: JSON.stringify({
+          doctorId,
+          slotStart: selectedPeptideSlot.slot_start,
+          customer: {
+            name: orderCustomer.name,
+            email: orderCustomer.email,
+            phone: orderCustomer.phone,
+          },
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload.consultation) {
+        throw new Error(payload.error ?? `peptide_consult_${response.status}`);
+      }
+
+      setPeptideBooking(payload);
+      await refreshBookings();
+      setView("bookings");
+      closeModal();
+      flash(`Peptide consult booked and tagged "${sellerName}".`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Peptide consult booking failed.");
+    } finally {
+      setBookingPeptideConsult(false);
+    }
   }
 
   const sellerName = partnerContext?.seller?.display_name || partnerContext?.seller_id || "Pulse OS";
@@ -568,6 +698,7 @@ export default function Home() {
           customer={orderCustomer}
           tab={orderTab}
           onTabChange={(nextTab) => {
+            if (nextTab !== "peptides") resetPeptideConsult();
             setOrderTab(nextTab);
             setOrderSearch("");
           }}
@@ -597,6 +728,13 @@ export default function Home() {
           onConfirm={confirmOrder}
           isConfirming={openingCheckout}
           sellerName={sellerName}
+          peptideSlots={peptideSlots}
+          selectedPeptideSlot={selectedPeptideSlot}
+          peptideSlotsLoading={peptideSlotsLoading}
+          peptideSlotsError={peptideSlotsError}
+          peptideBooking={peptideBooking}
+          isBookingPeptideConsult={bookingPeptideConsult}
+          onSelectPeptideSlot={setSelectedPeptideSlot}
           onBookConsult={bookConsult}
         />
       )}
@@ -1077,6 +1215,13 @@ function OrderModal({
   onConfirm,
   isConfirming,
   sellerName,
+  peptideSlots,
+  selectedPeptideSlot,
+  peptideSlotsLoading,
+  peptideSlotsError,
+  peptideBooking,
+  isBookingPeptideConsult,
+  onSelectPeptideSlot,
   onBookConsult,
 }: {
   customer: Customer;
@@ -1100,6 +1245,13 @@ function OrderModal({
   onConfirm: () => void;
   isConfirming: boolean;
   sellerName: string;
+  peptideSlots: PeptideConsultSlot[];
+  selectedPeptideSlot: PeptideConsultSlot | null;
+  peptideSlotsLoading: boolean;
+  peptideSlotsError: string;
+  peptideBooking: PeptideConsultBooking | null;
+  isBookingPeptideConsult: boolean;
+  onSelectPeptideSlot: (slot: PeptideConsultSlot) => void;
   onBookConsult: () => void;
 }) {
   const query = search.trim().toLowerCase();
@@ -1205,8 +1357,57 @@ function OrderModal({
                     <Tag size={13} />
                     Tag: {sellerName}
                   </span>
+                  {peptideBooking ? (
+                    <p className="pls-peptide-status">
+                      Consultation booked for{" "}
+                      {formatSlotDay(
+                        peptideBooking.consultation?.scheduled_start_at ??
+                          peptideBooking.consultation?.slot_start_ts ??
+                          selectedPeptideSlot?.slot_start ??
+                          "",
+                      )}{" "}
+                      {formatSlotTime(
+                        peptideBooking.consultation?.scheduled_start_at ??
+                          peptideBooking.consultation?.slot_start_ts ??
+                          selectedPeptideSlot?.slot_start ??
+                          "",
+                      )}
+                    </p>
+                  ) : peptideSlotsLoading ? (
+                    <p className="pls-peptide-status">Loading peptide consult slots...</p>
+                  ) : peptideSlotsError ? (
+                    <p className="pls-peptide-error">Could not load slots. {peptideSlotsError}</p>
+                  ) : peptideSlots.length === 0 ? (
+                    <p className="pls-peptide-status">No peptide consult slots are available right now.</p>
+                  ) : (
+                    <div className="pls-peptide-slots" aria-label="Available peptide consultation slots">
+                      {peptideSlots.slice(0, 8).map((slot) => {
+                        const selected = selectedPeptideSlot?.slot_start === slot.slot_start;
+                        return (
+                          <button
+                            type="button"
+                            key={slot.slot_start}
+                            className={selected ? "active" : ""}
+                            onClick={() => onSelectPeptideSlot(slot)}
+                          >
+                            <CalendarDays size={14} />
+                            <span>
+                              {formatSlotDay(slot.slot_start)}
+                              <small>{formatSlotTime(slot.slot_start)}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                <button onClick={onBookConsult}>Book consultation</button>
+                <button
+                  className="pls-peptide-book"
+                  disabled={!selectedPeptideSlot || peptideSlotsLoading || isBookingPeptideConsult || Boolean(peptideBooking)}
+                  onClick={onBookConsult}
+                >
+                  {isBookingPeptideConsult ? "Booking..." : "Book consultation"}
+                </button>
               </section>
             )}
           </div>
