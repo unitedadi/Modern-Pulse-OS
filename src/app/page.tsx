@@ -236,6 +236,17 @@ function formatSlotTime(value: string) {
   }).format(date);
 }
 
+function formatSlotDate(value: string) {
+  const date = new Date(`${value}T00:00:00+04:00`);
+  if (Number.isNaN(date.getTime())) return "Available";
+  return new Intl.DateTimeFormat("en-AE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Dubai",
+  }).format(date);
+}
+
 export default function Home() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [view, setView] = useState<View>("customers");
@@ -1274,6 +1285,30 @@ function OrderModal({
   const addDisabledReason = lockedOutVertical
     ? `Remove ${lockedOutVertical} items before adding ${lockedOutVertical === "Lab" ? "IV" : "Lab"}.`
     : "";
+  const peptideSlotGroups = useMemo(() => {
+    const groups = new Map<string, PeptideConsultSlot[]>();
+    peptideSlots.forEach((slot) => {
+      const [date] = slot.slot_start.split("T");
+      if (!date) return;
+      groups.set(date, [...(groups.get(date) ?? []), slot]);
+    });
+
+    return Array.from(groups, ([date, slots]) => ({
+      date,
+      slots: [...slots].sort((a, b) => a.slot_start.localeCompare(b.slot_start)),
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }, [peptideSlots]);
+  const selectedPeptideDate =
+    selectedPeptideSlot?.slot_start.split("T")[0] ?? peptideSlotGroups[0]?.date ?? "";
+  const visiblePeptideSlots =
+    peptideSlotGroups.find((group) => group.date === selectedPeptideDate)?.slots ??
+    peptideSlotGroups[0]?.slots ??
+    [];
+  const bookedPeptideSlot =
+    peptideBooking?.consultation?.scheduled_start_at ??
+    peptideBooking?.consultation?.slot_start_ts ??
+    selectedPeptideSlot?.slot_start ??
+    "";
 
   return (
     <ModalShell width="1080px">
@@ -1346,42 +1381,52 @@ function OrderModal({
 
             {showPeptides && (
               <section className="pls-peptide">
-                <div>
+                <div className="pls-peptide-intro">
                   <h3>Book a peptide consultation</h3>
                   <p>
                     Tagged with your seller name so it surfaces on the Rx dashboard.
                     When your customer buys a peptide after the consult, you earn
                     20%.
                   </p>
-                  <span>
+                  <span className="pls-peptide-tag">
                     <Tag size={13} />
                     Tag: {sellerName}
                   </span>
-                  {peptideBooking ? (
-                    <p className="pls-peptide-status">
-                      Consultation booked for{" "}
-                      {formatSlotDay(
-                        peptideBooking.consultation?.scheduled_start_at ??
-                          peptideBooking.consultation?.slot_start_ts ??
-                          selectedPeptideSlot?.slot_start ??
-                          "",
-                      )}{" "}
-                      {formatSlotTime(
-                        peptideBooking.consultation?.scheduled_start_at ??
-                          peptideBooking.consultation?.slot_start_ts ??
-                          selectedPeptideSlot?.slot_start ??
-                          "",
-                      )}
-                    </p>
-                  ) : peptideSlotsLoading ? (
-                    <p className="pls-peptide-status">Loading peptide consult slots...</p>
-                  ) : peptideSlotsError ? (
-                    <p className="pls-peptide-error">Could not load slots. {peptideSlotsError}</p>
-                  ) : peptideSlots.length === 0 ? (
-                    <p className="pls-peptide-status">No peptide consult slots are available right now.</p>
-                  ) : (
-                    <div className="pls-peptide-slots" aria-label="Available peptide consultation slots">
-                      {peptideSlots.slice(0, 8).map((slot) => {
+                </div>
+                {peptideBooking ? (
+                  <p className="pls-peptide-status">
+                    Consultation booked for {formatSlotDay(bookedPeptideSlot)}{" "}
+                    {formatSlotTime(bookedPeptideSlot)}
+                  </p>
+                ) : peptideSlotsLoading ? (
+                  <p className="pls-peptide-status">Loading peptide consult slots...</p>
+                ) : peptideSlotsError ? (
+                  <p className="pls-peptide-error">Could not load slots. {peptideSlotsError}</p>
+                ) : peptideSlotGroups.length === 0 ? (
+                  <p className="pls-peptide-status">No peptide consult slots are available right now.</p>
+                ) : (
+                  <div className="pls-peptide-scheduler">
+                    <div className="pls-peptide-dates" aria-label="Available consultation dates">
+                      {peptideSlotGroups.map((group) => {
+                        const selected = group.date === selectedPeptideDate;
+                        return (
+                          <button
+                            type="button"
+                            key={group.date}
+                            className={selected ? "active" : ""}
+                            onClick={() => onSelectPeptideSlot(group.slots[0])}
+                          >
+                            <CalendarDays size={15} />
+                            <span>
+                              {formatSlotDate(group.date)}
+                              <small>{group.slots.length} slot{group.slots.length === 1 ? "" : "s"}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="pls-peptide-slots" aria-label="Available consultation times">
+                      {visiblePeptideSlots.map((slot) => {
                         const selected = selectedPeptideSlot?.slot_start === slot.slot_start;
                         return (
                           <button
@@ -1390,24 +1435,33 @@ function OrderModal({
                             className={selected ? "active" : ""}
                             onClick={() => onSelectPeptideSlot(slot)}
                           >
-                            <CalendarDays size={14} />
-                            <span>
-                              {formatSlotDay(slot.slot_start)}
-                              <small>{formatSlotTime(slot.slot_start)}</small>
-                            </span>
+                            {formatSlotTime(slot.slot_start)}
                           </button>
                         );
                       })}
                     </div>
-                  )}
-                </div>
-                <button
-                  className="pls-peptide-book"
-                  disabled={!selectedPeptideSlot || peptideSlotsLoading || isBookingPeptideConsult || Boolean(peptideBooking)}
-                  onClick={onBookConsult}
-                >
-                  {isBookingPeptideConsult ? "Booking..." : "Book consultation"}
-                </button>
+                    <div className="pls-peptide-actions">
+                      <div>
+                        <span>Selected time</span>
+                        <strong>
+                          {selectedPeptideSlot
+                            ? `${formatSlotDay(selectedPeptideSlot.slot_start)} ${formatSlotTime(
+                                selectedPeptideSlot.slot_start,
+                              )}`
+                            : "Choose a slot"}
+                        </strong>
+                      </div>
+                      <button
+                        type="button"
+                        className="pls-peptide-book"
+                        disabled={!selectedPeptideSlot || isBookingPeptideConsult}
+                        onClick={onBookConsult}
+                      >
+                        {isBookingPeptideConsult ? "Booking..." : "Book consultation"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
           </div>
