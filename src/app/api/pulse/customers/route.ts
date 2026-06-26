@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { backendError, readJson, resolvePartnerContext, sellerUrl } from "../backend";
+import { backendError, backendUrl, readJson, resolvePartnerContext, sellerUrl } from "../backend";
+
+type Gender = "Female" | "Male";
 
 type BackendMember = {
   patient_id?: string | null;
@@ -16,6 +18,14 @@ type BackendCustomer = {
   phone?: string | null;
   member_count?: number | null;
   members?: BackendMember[] | null;
+};
+
+type CustomerCreatePayload = {
+  customer?: BackendCustomer;
+  member?: BackendMember | null;
+  attached_existing?: boolean;
+  error?: string;
+  detail?: string;
 };
 
 function gender(value: unknown) {
@@ -35,6 +45,66 @@ function customerToView(customer: BackendCustomer) {
     memberCount: customer.member_count ?? customer.members?.length ?? 0,
     member,
   };
+}
+
+function customerWithMember(customer: BackendCustomer, member: BackendMember | null | undefined) {
+  if (!member) return customer;
+  const members = customer.members?.length ? customer.members : [member];
+  return {
+    ...customer,
+    members,
+    member_count: Math.max(customer.member_count ?? 0, members.length),
+  };
+}
+
+async function hydrateSellerCustomer(sellerId: string, customerId: string) {
+  const lookupParams = new URLSearchParams({
+    q: customerId,
+    limit: "10",
+    page: "1",
+  });
+  const lookupResponse = await fetch(sellerUrl(sellerId, `/customers?${lookupParams}`), {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  const lookupPayload = (await readJson(lookupResponse)) as
+    | { items?: BackendCustomer[] }
+    | null;
+
+  return lookupPayload?.items?.find((customer) => customer.customer_id === customerId) ?? null;
+}
+
+async function createInitialMember(params: {
+  customerId: string;
+  name: string;
+  email: string;
+  phone: string;
+  age: number;
+  gender: Gender;
+}) {
+  const response = await fetch(backendUrl(`/customers/${encodeURIComponent(params.customerId)}/patients`), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: params.name,
+      email: params.email || undefined,
+      phone: params.phone,
+      age: params.age,
+      gender: params.gender,
+    }),
+  });
+  const payload = (await readJson(response)) as
+    | { patient?: BackendMember; error?: string; detail?: string }
+    | null;
+
+  if (!response.ok || !payload?.patient) {
+    throw new Error(backendError(payload, `member_create_${response.status}`));
+  }
+
+  return payload.patient;
 }
 
 export async function GET(request: Request) {
@@ -107,7 +177,7 @@ export async function POST(request: Request) {
     }),
   });
   const payload = (await readJson(response)) as
-    | { customer?: BackendCustomer; attached_existing?: boolean; error?: string; detail?: string }
+    | CustomerCreatePayload
     | null;
 
   if (!response.ok || !payload?.customer) {
@@ -117,25 +187,33 @@ export async function POST(request: Request) {
     );
   }
 
-  const lookupParams = new URLSearchParams({
-    q: payload.customer.customer_id,
-    limit: "10",
-    page: "1",
-  });
-  const lookupResponse = await fetch(sellerUrl(resolved.context.seller_id, `/customers?${lookupParams}`), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-  const lookupPayload = (await readJson(lookupResponse)) as
-    | { items?: BackendCustomer[] }
-    | null;
-  const hydratedCustomer = lookupPayload?.items?.find(
-    (customer) => customer.customer_id === payload.customer?.customer_id,
-  );
+  const customerId = payload.customer.customer_id;
+  let member = payload.member ?? null;
+  let hydratedCustomer = await hydrateSellerCustomer(resolved.context.seller_id, customerId);
+  const memberCount = hydratedCustomer?.member_count ?? hydratedCustomer?.members?.length ?? 0;
+
+  if (!member && memberCount === 0) {
+    try {
+      member = await createInitialMember({
+        customerId,
+        name,
+        email,
+        phone,
+        age,
+        gender: genderValue,
+      });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "member_create_failed" },
+        { status: 502 },
+      );
+    }
+    hydratedCustomer = await hydrateSellerCustomer(resolved.context.seller_id, customerId);
+  }
 
   return NextResponse.json(
     {
-      customer: customerToView(hydratedCustomer ?? payload.customer),
+      customer: customerToView(customerWithMember(hydratedCustomer ?? payload.customer, member)),
       attachedExisting: Boolean(payload.attached_existing),
     },
     { status: payload.attached_existing ? 200 : 201 },
