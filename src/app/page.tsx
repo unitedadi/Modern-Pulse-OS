@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import {
   AlertTriangle,
   CalendarDays,
@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   Info,
+  LogOut,
   Search,
   Settings,
   Tag,
@@ -251,6 +252,7 @@ function formatSlotDate(value: string) {
 
 export default function Home() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { signOut } = useClerk();
   const [view, setView] = useState<View>("customers");
   const [modal, setModal] = useState<Modal>(null);
   const [search, setSearch] = useState("");
@@ -267,6 +269,7 @@ export default function Home() {
   const [liveError, setLiveError] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [openingCheckout, setOpeningCheckout] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [liveLabProducts, setLiveLabProducts] = useState<Product[]>([]);
   const [liveIvProducts, setLiveIvProducts] = useState<Product[]>([]);
   const [servesPremise, setServesPremise] = useState(true);
@@ -497,6 +500,17 @@ export default function Home() {
     setPeptideBooking(null);
   }
 
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut({ redirectUrl: "/sign-in" });
+    } catch (error) {
+      setSigningOut(false);
+      flash(error instanceof Error ? error.message : "Sign out failed.");
+    }
+  }
+
   function closeModal() {
     setModal(null);
     setCart([]);
@@ -658,7 +672,13 @@ export default function Home() {
 
   return (
     <main className="pls-app">
-      <Sidebar activeView={view} sellerName={sellerName} onChange={changeView} />
+      <Sidebar
+        activeView={view}
+        sellerName={sellerName}
+        signingOut={signingOut}
+        onChange={changeView}
+        onSignOut={handleSignOut}
+      />
 
       <section className="pls-main">
         {view === "customers" && (
@@ -786,11 +806,15 @@ export default function Home() {
 function Sidebar({
   activeView,
   sellerName,
+  signingOut,
   onChange,
+  onSignOut,
 }: {
   activeView: View;
   sellerName: string;
+  signingOut: boolean;
   onChange: (view: View) => void;
+  onSignOut: () => void;
 }) {
   return (
     <aside className="pls-side">
@@ -833,6 +857,10 @@ function Sidebar({
           <div className="pls-seller-sub">Lab | IV | Peptides</div>
         </div>
       </div>
+      <button className="pls-logout" type="button" onClick={onSignOut} disabled={signingOut}>
+        <LogOut size={17} />
+        {signingOut ? "Signing out..." : "Log out"}
+      </button>
     </aside>
   );
 }

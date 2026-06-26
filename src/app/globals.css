@@ -163,6 +163,29 @@ input:focus {
   border-radius: 14px;
 }
 
+.pls-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.64);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 12px;
+}
+
+.pls-logout:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .pls-avatar {
   display: flex;
   flex: none;
