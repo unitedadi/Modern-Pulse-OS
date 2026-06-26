@@ -1412,40 +1412,42 @@ function OrderModal({
             )}
           </div>
 
-          <aside className="pls-cart" aria-label="Selected order items">
-            <div className="pls-cart-head">
-              <div className="pls-section-label">Selection</div>
-              <span>{cart.length} item{cart.length === 1 ? "" : "s"}</span>
-            </div>
-            {cartVertical && (
-              <div className="pls-cart-rule">
-                {cartVertical} order. Remove selected items to switch.
+          {!showPeptides && (
+            <aside className="pls-cart" aria-label="Selected order items">
+              <div className="pls-cart-head">
+                <div className="pls-section-label">Selection</div>
+                <span>{cart.length} item{cart.length === 1 ? "" : "s"}</span>
               </div>
-            )}
-            {cart.length === 0 ? (
-              <div className="pls-cart-empty">Add lab tests or IV therapy here.</div>
-            ) : (
-              <div className="pls-cart-list">
-                {cart.map((item, index) => (
-                  <div className="pls-cart-row" key={`${item.name}-${index}`}>
-                    <span>{item.name}</span>
-                    <span>AED {item.price}</span>
-                    <button onClick={() => onRemove(index)} aria-label="Remove item">
-                      <X size={16} />
-                    </button>
-                  </div>
-                ))}
+              {cartVertical && (
+                <div className="pls-cart-rule">
+                  {cartVertical} order. Remove selected items to switch.
+                </div>
+              )}
+              {cart.length === 0 ? (
+                <div className="pls-cart-empty">Add lab tests or IV therapy here.</div>
+              ) : (
+                <div className="pls-cart-list">
+                  {cart.map((item, index) => (
+                    <div className="pls-cart-row" key={`${item.name}-${index}`}>
+                      <span>{item.name}</span>
+                      <span>AED {item.price}</span>
+                      <button onClick={() => onRemove(index)} aria-label="Remove item">
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="pls-cart-footer">
+                <span>
+                  Total <em>|</em> AED {cartTotal.toLocaleString()}
+                </span>
+                <button className="pls-cta" onClick={onConfirm} disabled={cart.length === 0 || isConfirming}>
+                  {isConfirming ? "Opening checkout..." : "Checkout"}
+                </button>
               </div>
-            )}
-            <div className="pls-cart-footer">
-              <span>
-                Total <em>|</em> AED {cartTotal.toLocaleString()}
-              </span>
-              <button className="pls-cta" onClick={onConfirm} disabled={cart.length === 0 || isConfirming}>
-                {isConfirming ? "Opening checkout..." : "Checkout"}
-              </button>
-            </div>
-          </aside>
+            </aside>
+          )}
         </div>
       </div>
     </ModalShell>
