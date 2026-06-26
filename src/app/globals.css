@@ -379,6 +379,42 @@ input:focus {
     opacity 0.2s var(--dd-ease);
 }
 
+.pls-booking-filters {
+  display: inline-flex;
+  gap: 8px;
+  padding: 3px;
+  margin: 16px 0 18px;
+  background: var(--dd-fill-light);
+  border: 1px solid var(--dd-divider);
+  border-radius: 999px;
+}
+
+.pls-booking-filters button {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dd-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+}
+
+.pls-booking-filters button.active {
+  color: var(--dd-bg);
+  background: var(--dd-accent);
+}
+
+.pls-booking-filters span {
+  font-size: 12px;
+  opacity: 0.78;
+}
+
 .pls-table-head.bookings,
 .pls-booking-row {
   display: grid;
@@ -1428,6 +1464,13 @@ input:focus {
 
   .pls-cta {
     width: 100%;
+  }
+
+  .pls-booking-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    border-radius: 14px;
   }
 
   .pls-rowbtn {

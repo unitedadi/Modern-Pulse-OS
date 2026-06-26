@@ -64,7 +64,7 @@ export async function GET(request: Request) {
   const resolved = await resolvePartnerContext(request);
   if ("response" in resolved) return resolved.response;
 
-  const response = await fetch(sellerUrl(resolved.context.seller_id, "/bookings?limit=50&page=1"), {
+  const response = await fetch(sellerUrl(resolved.context.seller_id, "/bookings?limit=100&page=1"), {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });

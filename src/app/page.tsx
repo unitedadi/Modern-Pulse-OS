@@ -19,6 +19,7 @@ import {
 type View = "customers" | "bookings" | "revenue" | "settings";
 type Gender = "Female" | "Male";
 type OrderTab = "lab" | "iv" | "peptides";
+type BookingFilter = "All" | Booking["vertical"];
 
 type Customer = {
   id: string;
@@ -944,10 +945,35 @@ function BookingsView({
   loading: boolean;
   error: string;
 }) {
+  const [filter, setFilter] = useState<BookingFilter>("All");
+  const filteredBookings =
+    filter === "All" ? bookings : bookings.filter((booking) => booking.vertical === filter);
+  const filterOptions: BookingFilter[] = ["All", "Lab", "IV", "Peptides"];
+
   return (
     <>
       <h1>Bookings</h1>
       <p className="pls-page-copy">Everything you have booked for your customers.</p>
+
+      <div className="pls-booking-filters" aria-label="Booking filters">
+        {filterOptions.map((option) => {
+          const count =
+            option === "All"
+              ? bookings.length
+              : bookings.filter((booking) => booking.vertical === option).length;
+          return (
+            <button
+              type="button"
+              key={option}
+              className={filter === option ? "active" : ""}
+              onClick={() => setFilter(option)}
+            >
+              {option}
+              <span>{count}</span>
+            </button>
+          );
+        })}
+      </div>
 
       <div className="pls-table-head bookings">
         <span>Customer</span>
@@ -963,8 +989,11 @@ function BookingsView({
         {!loading && !error && bookings.length === 0 && (
           <EmptyState copy="No bookings yet for this seller." />
         )}
-        {bookings.map((booking) => (
-          <div className="pls-booking-row" key={booking.id}>
+        {!loading && !error && bookings.length > 0 && filteredBookings.length === 0 && (
+          <EmptyState copy={`No ${filter.toLowerCase()} bookings in the latest seller bookings.`} />
+        )}
+        {filteredBookings.map((booking) => (
+          <div className="pls-booking-row" key={`${booking.id}-${booking.service}`}>
             <span className="pls-booking-customer">{booking.customer}</span>
             <span>
               <span className="pls-row-title small">{booking.service}</span>
