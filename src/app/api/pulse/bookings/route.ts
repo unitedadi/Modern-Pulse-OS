@@ -79,6 +79,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const bookings = (payload?.items ?? []).map(bookingToView);
-  return NextResponse.json({ bookings, total: payload?.total ?? bookings.length });
+  const bookings = (payload?.items ?? [])
+    .map(bookingToView)
+    .filter((booking) => booking.status !== "Pending");
+  return NextResponse.json({ bookings, total: bookings.length });
 }
