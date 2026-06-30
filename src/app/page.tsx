@@ -1485,6 +1485,8 @@ function NewCustomerModal({
         <FieldLabel label="Phone" />
         <input
           className="pls-input"
+          type="tel"
+          inputMode="tel"
           value={value.phone}
           onChange={(event) => onChange({ ...value, phone: event.target.value })}
           placeholder="+971 50 000 0000"

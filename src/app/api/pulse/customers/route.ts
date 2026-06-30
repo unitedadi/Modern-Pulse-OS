@@ -53,6 +53,37 @@ function gender(value: unknown) {
   return String(value ?? "").trim().toLowerCase() === "male" ? "Male" : "Female";
 }
 
+function normalizePhone(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return null;
+
+  let normalized: string;
+  if (digits.startsWith("00")) {
+    normalized = `+${digits.slice(2)}`;
+  } else if (raw.startsWith("+")) {
+    normalized = `+${digits}`;
+  } else if (digits.startsWith("971")) {
+    normalized = `+${digits}`;
+  } else if (digits.startsWith("0") && digits.length === 10) {
+    normalized = `+971${digits.slice(1)}`;
+  } else {
+    normalized = `+${digits}`;
+  }
+
+  return /^\+[1-9]\d{6,14}$/.test(normalized) ? normalized : null;
+}
+
+function customerCreateError(payload: unknown, fallback: string) {
+  const error = backendError(payload, fallback);
+  if (/e\.?164|phone number/i.test(error)) {
+    return "Enter the phone number with country code, for example +971501234567.";
+  }
+  return error;
+}
+
 function customerToView(customer: BackendCustomer) {
   const member = customer.members?.[0] ?? null;
   return {
@@ -217,12 +248,15 @@ export async function POST(request: Request) {
 
   const name = String(input?.name ?? "").trim();
   const email = String(input?.email ?? "").trim();
-  const phone = String(input?.phone ?? "").trim();
+  const phone = normalizePhone(input?.phone);
   const age = Number(input?.age);
   const genderValue = gender(input?.gender);
 
   if (!name || !phone || !email || !Number.isInteger(age) || age < 0 || age > 150) {
-    return NextResponse.json({ error: "validation_error" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Enter name, email, age, and a phone number with country code." },
+      { status: 400 },
+    );
   }
 
   const response = await fetch(sellerUrl(resolved.context.seller_id, "/customers"), {
@@ -247,7 +281,7 @@ export async function POST(request: Request) {
 
   if (!response.ok || !payload?.customer) {
     return NextResponse.json(
-      { error: backendError(payload, `customer_create_${response.status}`) },
+      { error: customerCreateError(payload, `customer_create_${response.status}`) },
       { status: response.status },
     );
   }
@@ -273,7 +307,12 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : "member_create_failed" },
+        {
+          error: customerCreateError(
+            error instanceof Error ? { error: error.message } : null,
+            "member_create_failed",
+          ),
+        },
         { status: 502 },
       );
     }
