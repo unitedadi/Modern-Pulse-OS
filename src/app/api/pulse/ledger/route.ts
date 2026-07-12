@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, filsToAed, readJson, resolvePartnerContext, sellerUrl } from "../backend";
+import { backendError, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type BackendLedgerEntry = {
   order_id?: string | null;
@@ -23,27 +23,39 @@ function formatDate(value: string | null | undefined) {
 }
 
 function kind(value: string | null | undefined) {
-  return String(value ?? "").toLowerCase().includes("peptide") ? "peptide" : "sale";
+  const normalized = String(value ?? "").toLowerCase();
+  return normalized.includes("peptide") || normalized.includes("shipment") ? "peptide" : "sale";
 }
 
 function typeLabel(value: string | null | undefined) {
   const normalized = String(value ?? "").toLowerCase();
   if (normalized.includes("iv")) return "IV sale";
-  if (normalized.includes("peptide")) return "Peptide 20%";
+  if (normalized.includes("peptide") || normalized.includes("shipment")) return "Peptide sale";
   return "Lab sale";
+}
+
+function filsToAed(value: unknown) {
+  const fils = Number(value ?? 0);
+  if (!Number.isFinite(fils) || fils <= 0) return 0;
+  return Math.round(fils) / 100;
+}
+
+function formatAed(value: number) {
+  return value.toLocaleString("en-AE", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function entryToView(entry: BackendLedgerEntry, index: number) {
   const commission = filsToAed(entry.commission_fils);
-  const paid = filsToAed(entry.paid_amount_fils);
-  const amount = commission || paid;
   return {
     id: entry.booking_id ?? entry.order_id ?? String(index),
     date: formatDate(entry.paid_at),
     desc: entry.product ?? "Product",
     customer: entry.customer_name ?? "Customer",
     type: typeLabel(entry.vertical),
-    amount: `+ AED ${amount.toLocaleString()}`,
+    amount: `+ AED ${formatAed(commission)}`,
     kind: kind(entry.vertical),
   };
 }

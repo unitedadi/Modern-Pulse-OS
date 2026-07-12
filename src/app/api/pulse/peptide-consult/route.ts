@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, backendUrl, readJson, resolvePartnerContext } from "../backend";
+import { backendError, backendUrl, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type QuickConsultDoctor = {
   doctor_id?: string | null;
@@ -64,6 +64,30 @@ async function loadPeptideDoctor() {
   }
 
   return choosePeptideDoctor(doctorsPayload?.items ?? []);
+}
+
+async function loadPeptideCommercialConfig(sellerId: string) {
+  const response = await fetch(sellerUrl(sellerId, "/catalog"), {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  const payload = (await readJson(response)) as
+    | {
+        peptide_consultation?: {
+          commission_bps?: number | null;
+          promo_code?: string | null;
+        };
+        error?: string;
+        detail?: string;
+      }
+    | null;
+  if (!response.ok) {
+    throw new Error(backendError(payload, `peptide_catalog_${response.status}`));
+  }
+  return {
+    commissionBps: Number(payload?.peptide_consultation?.commission_bps ?? 2000),
+    promoCode: stringValue(payload?.peptide_consultation?.promo_code) || null,
+  };
 }
 
 export async function GET(request: Request) {
@@ -144,6 +168,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "peptide_consult_validation_error" }, { status: 400 });
   }
 
+  let commercialConfig: Awaited<ReturnType<typeof loadPeptideCommercialConfig>>;
+  try {
+    commercialConfig = await loadPeptideCommercialConfig(sellerId);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "peptide_catalog_failed" },
+      { status: 502 },
+    );
+  }
+
   const response = await fetch(backendUrl("/doctor/quickwlp/admin/consultations"), {
     method: "POST",
     headers: {
@@ -160,7 +194,8 @@ export async function POST(request: Request) {
       source_tag: sellerName,
       b2b_partner_id: sellerId,
       b2b_partner_name: sellerName,
-      b2b_commission_bps: 2000,
+      b2b_commission_bps: commercialConfig.commissionBps,
+      b2b_promo_code: commercialConfig.promoCode,
     }),
   });
   const payload = (await readJson(response)) as

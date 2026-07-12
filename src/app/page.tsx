@@ -136,6 +136,13 @@ type PulseSettingsPayload = {
   error?: string;
 };
 
+function formatAed(value: number) {
+  return value.toLocaleString("en-AE", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 const labProducts: Product[] = [
   {
     name: "Basic Health Checkup",
@@ -1199,9 +1206,9 @@ function RevenueView({
       <p className="pls-page-copy">Your ledger of earnings and payouts.</p>
 
       <div className="pls-metrics">
-        <MetricCard label="Total sales" value={`AED ${totals.paidAed.toLocaleString()}`} />
-        <MetricCard label="Commission" value={`AED ${totals.commissionAed.toLocaleString()}`} />
-        <MetricCard label="Pending payout" value={`AED ${totals.commissionAed.toLocaleString()}`} accent />
+        <MetricCard label="Total sales" value={`AED ${formatAed(totals.paidAed)}`} />
+        <MetricCard label="Commission" value={`AED ${formatAed(totals.commissionAed)}`} />
+        <MetricCard label="Pending payout" value={`AED ${formatAed(totals.commissionAed)}`} accent />
       </div>
 
       <div className="pls-table-head revenue">
