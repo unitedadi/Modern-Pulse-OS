@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, backendUrl, readJson, requestAuthorization, resolvePartnerContext } from "../backend";
+import { backendError, backendUrl, readJson, resolvePartnerContext } from "../backend";
 
 type CheckoutProduct = {
   productId?: unknown;
@@ -57,13 +57,11 @@ export async function POST(request: Request) {
     method: "POST",
     headers: {
       Accept: "application/json",
-      Authorization: requestAuthorization(request),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       seller_id: sellerId,
       platform: "b2b",
-      contract_version: 2,
       customer_id: customerId,
       checkout_mode: "ASSISTED_CHECKOUT",
       checkout_surface: "ASSISTED_FLOW",
@@ -86,22 +84,16 @@ export async function POST(request: Request) {
     | {
         checkout_intent_id?: string;
         checkout_url?: string;
-        contract_version?: number;
-        expires_at?: string | null;
+        expires_at?: string;
         error?: string;
         detail?: string;
       }
     | null;
 
-  if (!response.ok || !payload?.checkout_url || payload.contract_version !== 2) {
+  if (!response.ok || !payload?.checkout_url) {
     return NextResponse.json(
-      {
-        error:
-          response.ok && payload?.checkout_url
-            ? "checkout_intent_v2_required"
-            : backendError(payload, `checkout_intent_${response.status}`),
-      },
-      { status: response.ok ? 502 : response.status },
+      { error: backendError(payload, `checkout_intent_${response.status}`) },
+      { status: response.status },
     );
   }
 
