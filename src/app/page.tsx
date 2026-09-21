@@ -384,21 +384,27 @@ export default function Home() {
   const [peptideBooking, setPeptideBooking] = useState<PeptideConsultBooking | null>(null);
   const [bookingPeptideConsult, setBookingPeptideConsult] = useState(false);
 
-  const authHeaders = useCallback(async (contentType?: string) => {
-    const token = await getToken();
-    if (!token) throw new Error("missing_clerk_token");
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-    };
-    if (contentType) headers["Content-Type"] = contentType;
-    return headers;
-  }, [getToken]);
+  const fetchWithAuth = useCallback(
+    async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      async function send(skipCache: boolean) {
+        const token = await getToken(skipCache ? { skipCache: true } : undefined);
+        if (!token) throw new Error("missing_clerk_token");
+
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${token}`);
+        return fetch(input, { ...init, headers });
+      }
+
+      const response = await send(false);
+      return response.status === 401 ? send(true) : response;
+    },
+    [getToken]
+  );
 
   const refreshBookings = useCallback(async () => {
     try {
-      const response = await fetch("/api/pulse/bookings", {
+      const response = await fetchWithAuth("/api/pulse/bookings", {
         cache: "no-store",
-        headers: await authHeaders(),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -409,13 +415,12 @@ export default function Home() {
     } catch (error) {
       setLiveError(error instanceof Error ? error.message : "bookings_refresh_failed");
     }
-  }, [authHeaders]);
+  }, [fetchWithAuth]);
 
   const refreshLedger = useCallback(async () => {
     try {
-      const response = await fetch("/api/pulse/ledger", {
+      const response = await fetchWithAuth("/api/pulse/ledger", {
         cache: "no-store",
-        headers: await authHeaders(),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -427,7 +432,7 @@ export default function Home() {
     } catch (error) {
       setLiveError(error instanceof Error ? error.message : "ledger_refresh_failed");
     }
-  }, [authHeaders]);
+  }, [fetchWithAuth]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -439,7 +444,6 @@ export default function Home() {
       setLiveLoading(true);
       setLiveError("");
       try {
-        const headers = await authHeaders();
         const [
           contextResponse,
           customersResponse,
@@ -449,12 +453,12 @@ export default function Home() {
           settingsResponse,
         ] =
           await Promise.all([
-            fetch("/api/pulse/context", { cache: "no-store", headers }),
-            fetch("/api/pulse/customers", { cache: "no-store", headers }),
-            fetch("/api/pulse/catalog", { cache: "no-store", headers }),
-            fetch("/api/pulse/bookings", { cache: "no-store", headers }),
-            fetch("/api/pulse/ledger", { cache: "no-store", headers }),
-            fetch("/api/pulse/settings", { cache: "no-store", headers }),
+            fetchWithAuth("/api/pulse/context", { cache: "no-store" }),
+            fetchWithAuth("/api/pulse/customers", { cache: "no-store" }),
+            fetchWithAuth("/api/pulse/catalog", { cache: "no-store" }),
+            fetchWithAuth("/api/pulse/bookings", { cache: "no-store" }),
+            fetchWithAuth("/api/pulse/ledger", { cache: "no-store" }),
+            fetchWithAuth("/api/pulse/settings", { cache: "no-store" }),
           ]);
 
         const [
@@ -516,7 +520,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [authHeaders, isLoaded, isSignedIn]);
+  }, [fetchWithAuth, isLoaded, isSignedIn]);
 
   useEffect(() => {
     function refreshVisibleSellerData() {
@@ -548,9 +552,8 @@ export default function Home() {
       setSelectedPeptideSlot(null);
       setPeptideBooking(null);
       try {
-        const response = await fetch("/api/pulse/peptide-consult", {
+        const response = await fetchWithAuth("/api/pulse/peptide-consult", {
           cache: "no-store",
-          headers: await authHeaders(),
         });
         const payload = await response.json();
         if (!response.ok) {
@@ -577,7 +580,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [authHeaders, modal, orderCustomer, orderTab]);
+  }, [fetchWithAuth, modal, orderCustomer, orderTab]);
 
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -614,9 +617,9 @@ export default function Home() {
 
     setSavingSettings(true);
     try {
-      const response = await fetch("/api/pulse/settings", {
+      const response = await fetchWithAuth("/api/pulse/settings", {
         method: "PATCH",
-        headers: await authHeaders("application/json"),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           serves_on_premise: servesPremise,
           premise_address: servesPremise ? premiseAddress : null,
@@ -679,9 +682,9 @@ export default function Home() {
     if (creatingCustomer) return;
     setCreatingCustomer(true);
     try {
-      const response = await fetch("/api/pulse/customers", {
+      const response = await fetchWithAuth("/api/pulse/customers", {
         method: "POST",
-        headers: await authHeaders("application/json"),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCustomer),
       });
       const payload = await response.json();
@@ -728,9 +731,9 @@ export default function Home() {
     if (checkoutWindow) checkoutWindow.opener = null;
     setOpeningCheckout(true);
     try {
-      const response = await fetch("/api/pulse/checkout", {
+      const response = await fetchWithAuth("/api/pulse/checkout", {
         method: "POST",
-        headers: await authHeaders("application/json"),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: orderCustomer.customerId ?? orderCustomer.id,
           products: cart.map((item) => ({
@@ -771,9 +774,9 @@ export default function Home() {
 
     setBookingPeptideConsult(true);
     try {
-      const response = await fetch("/api/pulse/peptide-consult", {
+      const response = await fetchWithAuth("/api/pulse/peptide-consult", {
         method: "POST",
-        headers: await authHeaders("application/json"),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           doctorId,
           slotStart: selectedPeptideSlot.slot_start,
