@@ -49,6 +49,11 @@ type PulseProfile = {
   premise_address?: PremiseAddress | null;
 };
 
+function backendAdminHeaders(): Record<string, string> {
+  const apiKey = String(process.env.PULSE_ADMIN_API_KEY ?? "").trim();
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
 function gender(value: unknown) {
   return String(value ?? "").trim().toLowerCase() === "male" ? "Male" : "Female";
 }
@@ -116,7 +121,7 @@ async function hydrateSellerCustomer(sellerId: string, customerId: string) {
     page: "1",
   });
   const lookupResponse = await fetch(sellerUrl(sellerId, `/customers?${lookupParams}`), {
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...backendAdminHeaders() },
     cache: "no-store",
   });
   const lookupPayload = (await readJson(lookupResponse)) as
@@ -216,7 +221,7 @@ export async function GET(request: Request) {
   if (query) params.set("q", query);
 
   const response = await fetch(sellerUrl(resolved.context.seller_id, `/customers?${params}`), {
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...backendAdminHeaders() },
     cache: "no-store",
   });
   const payload = (await readJson(response)) as
@@ -264,6 +269,7 @@ export async function POST(request: Request) {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...backendAdminHeaders(),
     },
     body: JSON.stringify({
       name,
