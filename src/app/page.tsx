@@ -22,6 +22,23 @@ type Gender = "Female" | "Male";
 type OrderTab = "lab" | "iv" | "peptides";
 type BookingFilter = "All" | Booking["vertical"];
 
+type CustomerMember = {
+  patient_id: string;
+  name?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  date_of_birth?: string | null;
+};
+
+function consultMemberProfileMessage(member?: CustomerMember) {
+  if (!member) return "";
+  const missing = [
+    !member.date_of_birth ? "date of birth" : null,
+    !["male", "female", "other"].includes(member.gender?.toLowerCase() ?? "") ? "gender" : null,
+  ].filter(Boolean);
+  return missing.length ? `Complete this member's ${missing.join(" and ")} before booking.` : "";
+}
+
 type Customer = {
   id: string;
   customerId?: string;
@@ -373,6 +390,8 @@ export default function Home() {
     gender: "Female" as Gender,
   });
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
+  const [consultPatientId, setConsultPatientId] = useState("");
+  const [consultMembers, setConsultMembers] = useState<CustomerMember[]>([]);
   const [orderTab, setOrderTab] = useState<OrderTab>("lab");
   const [orderSearch, setOrderSearch] = useState("");
   const [cart, setCart] = useState<Product[]>([]);
@@ -551,8 +570,11 @@ export default function Home() {
       setPeptideSlotsError("");
       setSelectedPeptideSlot(null);
       setPeptideBooking(null);
+      setConsultMembers([]);
+      setConsultPatientId("");
       try {
-        const response = await fetchWithAuth("/api/pulse/peptide-consult", {
+        const params = new URLSearchParams({ customerId: orderCustomer!.customerId ?? orderCustomer!.id });
+        const response = await fetchWithAuth(`/api/pulse/peptide-consult?${params}`, {
           cache: "no-store",
         });
         const payload = await response.json();
@@ -560,6 +582,9 @@ export default function Home() {
           throw new Error(payload.error ?? `peptide_slots_${response.status}`);
         }
         if (cancelled) return;
+        const members = (payload.members ?? []) as CustomerMember[];
+        setConsultMembers(members);
+        setConsultPatientId(members.length === 1 ? members[0].patient_id : "");
         const slots = (payload.slots ?? []) as PeptideConsultSlot[];
         const availableSlots = slots.filter(
           (slot) => String(slot.status ?? "").toUpperCase() !== "BOOKED" && slot.slot_start,
@@ -715,6 +740,8 @@ export default function Home() {
   function startOrder(customer: Customer) {
     resetPeptideConsult();
     setOrderCustomer(customer);
+    setConsultMembers([]);
+    setConsultPatientId("");
     setOrderTab("lab");
     setOrderSearch("");
     setCart([]);
@@ -762,6 +789,15 @@ export default function Home() {
 
   async function bookConsult() {
     if (!orderCustomer || !selectedPeptideSlot || bookingPeptideConsult) return;
+    if (!consultPatientId || !consultMembers.some((member) => member.patient_id === consultPatientId)) {
+      flash("Choose the member who will attend this consultation.");
+      return;
+    }
+    const profileMessage = consultMemberProfileMessage(consultMembers.find((member) => member.patient_id === consultPatientId));
+    if (profileMessage) {
+      flash(profileMessage);
+      return;
+    }
     const doctorId = selectedPeptideSlot.doctor_id;
     if (!doctorId) {
       flash("peptide_doctor_missing");
@@ -779,6 +815,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           doctorId,
+          patientId: consultPatientId,
           slotStart: selectedPeptideSlot.slot_start,
           customer: {
             name: orderCustomer.name,
@@ -790,7 +827,7 @@ export default function Home() {
       const payload = await response.json();
 
       if (!response.ok || !payload.consultation) {
-        throw new Error(payload.error ?? `peptide_consult_${response.status}`);
+        throw new Error(payload.message ?? payload.error ?? `peptide_consult_${response.status}`);
       }
 
       setPeptideBooking(payload);
@@ -913,6 +950,9 @@ export default function Home() {
           isConfirming={openingCheckout}
           sellerName={sellerName}
           peptideSlots={peptideSlots}
+          consultPatientId={consultPatientId}
+          consultMembers={consultMembers}
+          onSelectConsultPatient={setConsultPatientId}
           selectedPeptideSlot={selectedPeptideSlot}
           peptideSlotsLoading={peptideSlotsLoading}
           peptideSlotsError={peptideSlotsError}
@@ -1572,6 +1612,9 @@ function OrderModal({
   isConfirming,
   sellerName,
   peptideSlots,
+  consultPatientId,
+  consultMembers,
+  onSelectConsultPatient,
   selectedPeptideSlot,
   peptideSlotsLoading,
   peptideSlotsError,
@@ -1602,6 +1645,9 @@ function OrderModal({
   isConfirming: boolean;
   sellerName: string;
   peptideSlots: PeptideConsultSlot[];
+  consultPatientId: string;
+  consultMembers: CustomerMember[];
+  onSelectConsultPatient: (patientId: string) => void;
   selectedPeptideSlot: PeptideConsultSlot | null;
   peptideSlotsLoading: boolean;
   peptideSlotsError: string;
@@ -1645,6 +1691,7 @@ function OrderModal({
   }, [peptideSlots]);
   const selectedPeptideDate =
     selectedPeptideSlot?.slot_start.split("T")[0] ?? peptideSlotGroups[0]?.date ?? "";
+  const memberProfileMessage = consultMemberProfileMessage(consultMembers.find((member) => member.patient_id === consultPatientId));
   const visiblePeptideSlots =
     peptideSlotGroups.find((group) => group.date === selectedPeptideDate)?.slots ??
     peptideSlotGroups[0]?.slots ??
@@ -1738,6 +1785,24 @@ function OrderModal({
                     Tag: {sellerName}
                   </span>
                 </div>
+                <div className="pls-field-label"><label htmlFor="consult-patient">Member</label></div>
+                <select
+                  id="consult-patient"
+                  className="pls-input"
+                  value={consultPatientId}
+                  onChange={(event) => onSelectConsultPatient(event.target.value)}
+                  disabled={isBookingPeptideConsult || peptideSlotsLoading || !consultMembers.length}
+                >
+                  <option value="" disabled>
+                    {peptideSlotsLoading ? "Loading members..." : consultMembers.length ? "Choose a member" : "No member available"}
+                  </option>
+                  {consultMembers.map((member) => (
+                    <option key={member.patient_id} value={member.patient_id}>
+                      {member.name || "Member"}{member.age != null ? ` (${member.age} years)` : ""}
+                    </option>
+                  ))}
+                </select>
+                {memberProfileMessage && <p className="pls-peptide-error" role="status">{memberProfileMessage}</p>}
                 {peptideBooking ? (
                   <p className="pls-peptide-status">
                     Consultation booked for {formatSlotDay(bookedPeptideSlot)}{" "}
@@ -1799,7 +1864,7 @@ function OrderModal({
                       <button
                         type="button"
                         className="pls-peptide-book"
-                        disabled={!selectedPeptideSlot || isBookingPeptideConsult}
+                        disabled={!selectedPeptideSlot || !consultPatientId || Boolean(memberProfileMessage) || isBookingPeptideConsult}
                         onClick={onBookConsult}
                       >
                         {isBookingPeptideConsult ? "Booking..." : "Book consultation"}

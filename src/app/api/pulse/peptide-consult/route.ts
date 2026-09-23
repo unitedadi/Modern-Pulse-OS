@@ -16,6 +16,14 @@ type QuickConsultSlot = {
   available_doctors?: Array<{ doctor_id?: string | null; doctor_name?: string | null }> | null;
 };
 
+type ConsultMember = {
+  patient_id: string;
+  name?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  date_of_birth?: string | null;
+};
+
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -104,11 +112,46 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "peptide_consult_auth_not_configured" }, { status: 503 });
   }
 
+  const customerId = new URL(request.url).searchParams.get("customerId")?.trim();
+  if (!customerId) {
+    return NextResponse.json({ error: "customer_required" }, { status: 400 });
+  }
+
   try {
+    // Scope the phone lookup to a customer owned by the authenticated partner.
+    const customerParams = new URLSearchParams({ q: customerId, limit: "10", page: "1" });
+    const customerResponse = await fetch(sellerUrl(resolved.context.seller_id, `/customers?${customerParams}`), {
+      headers,
+      cache: "no-store",
+    });
+    const customerPayload = (await readJson(customerResponse)) as
+      | { items?: Array<{ customer_id: string; phone?: string | null }> }
+      | null;
+    if (!customerResponse.ok) {
+      return NextResponse.json({ error: backendError(customerPayload, "customer_lookup_failed") }, { status: customerResponse.status });
+    }
+    const customer = customerPayload?.items?.find((item) => item.customer_id === customerId);
+    if (!customer?.phone) {
+      return NextResponse.json({ error: "customer_not_found" }, { status: 404 });
+    }
+    const memberParams = new URLSearchParams({ phone_number: customer.phone });
+    const memberResponse = await fetch(backendUrl(`/admin/quickwlp/customer?${memberParams}`), { headers, cache: "no-store" });
+    const memberPayload = (await readJson(memberResponse)) as
+      | { customer?: { customer_id: string }; patients?: ConsultMember[] }
+      | null;
+    if (!memberResponse.ok) {
+      return NextResponse.json({ error: backendError(memberPayload, "member_lookup_failed") }, { status: memberResponse.status });
+    }
+    if (memberPayload?.customer?.customer_id !== customerId) {
+      return NextResponse.json({ error: "customer_identity_mismatch" }, { status: 409 });
+    }
+    const members = (memberPayload.patients ?? []).map(({ patient_id, name, age, gender, date_of_birth }) => ({
+      patient_id, name, age, gender, date_of_birth,
+    }));
     const doctor = await loadPeptideDoctor(headers);
     const doctorId = stringValue(doctor?.doctor_id);
     if (!doctor || !doctorId) {
-      return NextResponse.json({ doctor: null, slots: [] });
+      return NextResponse.json({ doctor: null, slots: [], members });
     }
 
     const params = new URLSearchParams({
@@ -132,7 +175,7 @@ export async function GET(request: Request) {
         error === "microsoft_graph_not_configured" ||
         error === "microsoft_graph_mailbox_missing"
       ) {
-        return NextResponse.json({ doctor, slots: [] });
+        return NextResponse.json({ doctor, slots: [], members });
       }
       return NextResponse.json({ error }, { status: slotsResponse.status });
     }
@@ -141,7 +184,7 @@ export async function GET(request: Request) {
       ...slot,
       doctor_id: slotDoctorId(slot, doctorId),
     }));
-    return NextResponse.json({ doctor, slots });
+    return NextResponse.json({ doctor, slots, members });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "quick_consult_slots_failed" },
@@ -162,6 +205,7 @@ export async function POST(request: Request) {
   const input = (await request.json().catch(() => null)) as
     | {
         doctorId?: unknown;
+        patientId?: unknown;
         slotStart?: unknown;
         customer?: {
           name?: unknown;
@@ -172,6 +216,7 @@ export async function POST(request: Request) {
     | null;
 
   const doctorId = stringValue(input?.doctorId);
+  const patientId = stringValue(input?.patientId);
   const slotStart = stringValue(input?.slotStart);
   const customerName = stringValue(input?.customer?.name);
   const customerEmail = stringValue(input?.customer?.email);
@@ -181,6 +226,12 @@ export async function POST(request: Request) {
 
   if (!doctorId || !slotStart || !customerPhone) {
     return NextResponse.json({ error: "peptide_consult_validation_error" }, { status: 400 });
+  }
+  if (!patientId) {
+    return NextResponse.json(
+      { error: "patient_selection_required", message: "Choose the member who will attend this consultation." },
+      { status: 400 },
+    );
   }
 
   let commercialConfig: Awaited<ReturnType<typeof loadPeptideCommercialConfig>>;
@@ -201,6 +252,7 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       doctor_id: doctorId,
+      patient_id: patientId,
       phone_number: customerPhone,
       name: customerName || undefined,
       email: customerEmail || undefined,
