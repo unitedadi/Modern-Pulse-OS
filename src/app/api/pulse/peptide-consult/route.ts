@@ -20,6 +20,11 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function consultationHeaders() {
+  const key = stringValue(process.env.PULSE_ADMIN_API_KEY);
+  return key ? { Accept: "application/json", Authorization: `Bearer ${key}` } : null;
+}
+
 function dubaiTodayYmd() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Dubai",
@@ -50,9 +55,9 @@ function slotDoctorId(slot: QuickConsultSlot, fallbackDoctorId: string) {
   );
 }
 
-async function loadPeptideDoctor() {
+async function loadPeptideDoctor(headers: Record<string, string>) {
   const doctorsResponse = await fetch(backendUrl("/ops/quickwlp/doctors?active=true&limit=200"), {
-    headers: { Accept: "application/json" },
+    headers,
     cache: "no-store",
   });
   const doctorsPayload = (await readJson(doctorsResponse)) as
@@ -66,9 +71,9 @@ async function loadPeptideDoctor() {
   return choosePeptideDoctor(doctorsPayload?.items ?? []);
 }
 
-async function loadPeptideCommercialConfig(sellerId: string) {
+async function loadPeptideCommercialConfig(sellerId: string, headers: Record<string, string>) {
   const response = await fetch(sellerUrl(sellerId, "/catalog"), {
-    headers: { Accept: "application/json" },
+    headers,
     cache: "no-store",
   });
   const payload = (await readJson(response)) as
@@ -94,8 +99,13 @@ export async function GET(request: Request) {
   const resolved = await resolvePartnerContext(request);
   if ("response" in resolved) return resolved.response;
 
+  const headers = consultationHeaders();
+  if (!headers) {
+    return NextResponse.json({ error: "peptide_consult_auth_not_configured" }, { status: 503 });
+  }
+
   try {
-    const doctor = await loadPeptideDoctor();
+    const doctor = await loadPeptideDoctor(headers);
     const doctorId = stringValue(doctor?.doctor_id);
     if (!doctor || !doctorId) {
       return NextResponse.json({ doctor: null, slots: [] });
@@ -108,7 +118,7 @@ export async function GET(request: Request) {
       days: "14",
     });
     const slotsResponse = await fetch(backendUrl(`/admin/quickwlp/slots?${params}`), {
-      headers: { Accept: "application/json" },
+      headers,
       cache: "no-store",
     });
     const slotsPayload = (await readJson(slotsResponse)) as
@@ -144,6 +154,11 @@ export async function POST(request: Request) {
   const resolved = await resolvePartnerContext(request);
   if ("response" in resolved) return resolved.response;
 
+  const headers = consultationHeaders();
+  if (!headers) {
+    return NextResponse.json({ error: "peptide_consult_auth_not_configured" }, { status: 503 });
+  }
+
   const input = (await request.json().catch(() => null)) as
     | {
         doctorId?: unknown;
@@ -170,7 +185,7 @@ export async function POST(request: Request) {
 
   let commercialConfig: Awaited<ReturnType<typeof loadPeptideCommercialConfig>>;
   try {
-    commercialConfig = await loadPeptideCommercialConfig(sellerId);
+    commercialConfig = await loadPeptideCommercialConfig(sellerId, headers);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "peptide_catalog_failed" },
@@ -181,7 +196,7 @@ export async function POST(request: Request) {
   const response = await fetch(backendUrl("/doctor/quickwlp/admin/consultations"), {
     method: "POST",
     headers: {
-      Accept: "application/json",
+      ...headers,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
