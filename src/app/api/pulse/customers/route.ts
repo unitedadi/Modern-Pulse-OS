@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { backendError, backendUrl, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
@@ -9,6 +10,8 @@ type BackendMember = {
   email?: string | null;
   age?: number | null;
   gender?: string | null;
+  date_of_birth?: string | null;
+  identity_revision?: string;
 };
 
 type BackendCustomer = {
@@ -104,14 +107,25 @@ function customerToView(customer: BackendCustomer) {
   };
 }
 
-function customerWithMember(customer: BackendCustomer, member: BackendMember | null | undefined) {
-  if (!member) return customer;
-  const members = customer.members?.length ? customer.members : [member];
-  return {
-    ...customer,
-    members,
-    member_count: Math.max(customer.member_count ?? 0, members.length),
-  };
+function ageFromBirthDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
+  const today = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const age = Number(today.slice(0, 4)) - Number(value.slice(0, 4)) - (today.slice(5) < value.slice(5) ? 1 : 0);
+  return value > today || age < 0 || age > 150 ? null : age;
+}
+
+async function loadConsultationMembers(customerId: string, phone: string) {
+  const params = new URLSearchParams({ phone_number: phone });
+  const response = await fetch(backendUrl(`/admin/quickwlp/customer?${params}`), {
+    headers: { Accept: "application/json", ...backendAdminHeaders() },
+    cache: "no-store",
+  });
+  const payload = (await readJson(response)) as { customer?: BackendCustomer; patients?: BackendMember[] } | null;
+  if (!response.ok) throw new Error(backendError(payload, "member_lookup_failed"));
+  if (payload?.customer?.customer_id !== customerId) throw new Error("customer_identity_mismatch");
+  return (payload.patients ?? []).filter((member) => member.patient_id);
 }
 
 async function hydrateSellerCustomer(sellerId: string, customerId: string) {
@@ -133,7 +147,7 @@ async function hydrateSellerCustomer(sellerId: string, customerId: string) {
 
 async function loadPulseProfile(sellerId: string) {
   const response = await fetch(sellerUrl(sellerId, ""), {
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...backendAdminHeaders() },
     cache: "no-store",
   });
   const payload = (await readJson(response)) as
@@ -144,33 +158,39 @@ async function loadPulseProfile(sellerId: string) {
   return payload?.pulse_profile ?? null;
 }
 
-async function createInitialMember(params: {
+async function saveInitialMember(params: {
   customerId: string;
+  member?: BackendMember;
   name: string;
-  email: string;
   phone: string;
-  age: number;
+  dateOfBirth: string;
   gender: Gender;
 }) {
-  const response = await fetch(backendUrl(`/customers/${encodeURIComponent(params.customerId)}/patients`), {
+  // Stable across retries so an uncertain create cannot mint a second member.
+  const patientId = params.member?.patient_id ?? `PULSE-${createHash("sha256").update(params.customerId).digest("hex").slice(0, 32)}`;
+  const response = await fetch(backendUrl("/admin/quickwlp/member"), {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...backendAdminHeaders(),
     },
     body: JSON.stringify({
       name: params.name,
-      email: params.email || undefined,
-      phone: params.phone,
-      age: params.age,
-      gender: params.gender,
+      account_name: params.name,
+      phone_number: params.phone,
+      patient_id: patientId,
+      mode: params.member ? "edit" : "create",
+      expected_revision: params.member?.identity_revision,
+      date_of_birth: params.dateOfBirth,
+      gender: params.gender.toLowerCase(),
     }),
   });
   const payload = (await readJson(response)) as
     | { patient?: BackendMember; error?: string; detail?: string }
     | null;
 
-  if (!response.ok || !payload?.patient) {
+  if (!response.ok || !payload?.patient?.patient_id) {
     throw new Error(backendError(payload, `member_create_${response.status}`));
   }
 
@@ -178,11 +198,12 @@ async function createInitialMember(params: {
 }
 
 async function createPremiseAddress(customerId: string, address: PremiseAddress) {
-  const response = await fetch(backendUrl(`/customers/${encodeURIComponent(customerId)}/addresses`), {
+  const response = await fetch(backendUrl(`/admin/customers/${encodeURIComponent(customerId)}/addresses`), {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...backendAdminHeaders(),
     },
     body: JSON.stringify({
       saved_name: address.saved_name ?? "Premise",
@@ -242,24 +263,28 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const resolved = await resolvePartnerContext(request);
   if ("response" in resolved) return resolved.response;
+  if (!backendAdminHeaders().Authorization) {
+    return NextResponse.json({ error: "customer_create_auth_not_configured" }, { status: 503 });
+  }
 
   const input = (await request.json().catch(() => null)) as {
     name?: unknown;
     email?: unknown;
     phone?: unknown;
-    age?: unknown;
+    dateOfBirth?: unknown;
     gender?: unknown;
   } | null;
 
   const name = String(input?.name ?? "").trim();
   const email = String(input?.email ?? "").trim();
   const phone = normalizePhone(input?.phone);
-  const age = Number(input?.age);
+  const dateOfBirth = String(input?.dateOfBirth ?? "").trim();
+  const age = ageFromBirthDate(dateOfBirth);
   const genderValue = gender(input?.gender);
 
-  if (!name || !phone || !email || !Number.isInteger(age) || age < 0 || age > 150) {
+  if (!name || !phone || !email || age === null || !["Male", "Female"].includes(String(input?.gender))) {
     return NextResponse.json(
-      { error: "Enter name, email, age, and a phone number with country code." },
+      { error: "Enter name, email, a valid date of birth, gender, and a phone number with country code." },
       { status: 400 },
     );
   }
@@ -285,49 +310,55 @@ export async function POST(request: Request) {
     | CustomerCreatePayload
     | null;
 
-  if (!response.ok || !payload?.customer) {
+  if (!response.ok || !payload?.customer?.customer_id) {
     return NextResponse.json(
       { error: customerCreateError(payload, `customer_create_${response.status}`) },
-      { status: response.status },
+      { status: response.ok ? 502 : response.status },
     );
   }
 
   const customerId = payload.customer.customer_id;
-  let member = payload.member ?? null;
-  let hydratedCustomer = await hydrateSellerCustomer(resolved.context.seller_id, customerId);
-  const memberCount = hydratedCustomer?.member_count ?? hydratedCustomer?.members?.length ?? 0;
+  let members: BackendMember[];
+  try {
+    members = await loadConsultationMembers(customerId, phone);
+    const createdMember = payload.member?.patient_id
+      ? members.find((member) => member.patient_id === payload.member?.patient_id)
+      : undefined;
+    if (payload.member && !createdMember) throw new Error("member_creation_not_verified");
 
-  if (!member && memberCount === 0) {
-    try {
-      member = await createInitialMember({
+    // Complete only the member created by this request; never overwrite an existing family's details.
+    if (createdMember || members.length === 0) {
+      const member = await saveInitialMember({
         customerId,
+        member: createdMember,
         name,
-        email,
         phone,
-        age,
+        dateOfBirth,
         gender: genderValue,
       });
-      const pulseProfile = await loadPulseProfile(resolved.context.seller_id);
-      if (pulseProfile?.serves_on_premise && pulseProfile.premise_address) {
-        await createPremiseAddress(customerId, pulseProfile.premise_address);
+      members = await loadConsultationMembers(customerId, phone);
+      const verified = members.find((item) => item.patient_id === member.patient_id);
+      if (!verified || verified.date_of_birth !== dateOfBirth || verified.gender?.toLowerCase() !== genderValue.toLowerCase()) {
+        throw new Error("member_creation_not_verified");
       }
-    } catch (error) {
-      return NextResponse.json(
-        {
-          error: customerCreateError(
-            error instanceof Error ? { error: error.message } : null,
-            "member_create_failed",
-          ),
-        },
-        { status: 502 },
-      );
+      if (!createdMember) {
+        const pulseProfile = await loadPulseProfile(resolved.context.seller_id);
+        if (pulseProfile?.serves_on_premise && pulseProfile.premise_address) {
+          await createPremiseAddress(customerId, pulseProfile.premise_address);
+        }
+      }
     }
-    hydratedCustomer = await hydrateSellerCustomer(resolved.context.seller_id, customerId);
+  } catch (error) {
+    return NextResponse.json(
+      { error: customerCreateError(error instanceof Error ? { error: error.message } : null, "member_create_failed") },
+      { status: 502 },
+    );
   }
 
+  const hydratedCustomer = await hydrateSellerCustomer(resolved.context.seller_id, customerId);
   return NextResponse.json(
     {
-      customer: customerToView(customerWithMember(hydratedCustomer ?? payload.customer, member)),
+      customer: customerToView({ ...(hydratedCustomer ?? payload.customer), members, member_count: members.length }),
       attachedExisting: Boolean(payload.attached_existing),
     },
     { status: payload.attached_existing ? 200 : 201 },

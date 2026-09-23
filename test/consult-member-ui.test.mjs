@@ -105,3 +105,14 @@ test("incomplete member demographics block submission without inventing missing 
   await find(render(), "OrderModal").props.onBookConsult();
   assert.equal(requests.length, 0);
 });
+
+test("new-customer form sends the entered birth date, not an inferred date from age", async () => {
+  const { render, requests } = fixture([]);
+  find(render(), "CustomersView").props.onNewCustomer();
+  const modal = find(render(), "NewCustomerModal").props;
+  modal.onChange({ name: "Member", email: "test@example.com", phone: "+971500000001", dateOfBirth: "1990-02-15", gender: "Male" });
+  await find(render(), "NewCustomerModal").props.onCreate();
+  assert.equal(requests[0].url, "/api/pulse/customers");
+  assert.equal(requests[0].body.dateOfBirth, "1990-02-15");
+  assert.equal(requests[0].body.age, undefined);
+});

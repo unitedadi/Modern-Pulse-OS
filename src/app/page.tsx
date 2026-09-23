@@ -386,7 +386,7 @@ export default function Home() {
     name: "",
     email: "",
     phone: "",
-    age: "",
+    dateOfBirth: "",
     gender: "Female" as Gender,
   });
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
@@ -697,7 +697,7 @@ export default function Home() {
       name: "",
       email: "",
       phone: "",
-      age: "",
+      dateOfBirth: "",
       gender: "Female",
     });
     setModal("newCustomer");
@@ -1494,7 +1494,7 @@ function NewCustomerModal({
     name: string;
     email: string;
     phone: string;
-    age: string;
+    dateOfBirth: string;
     gender: Gender;
   };
   servesPremise: boolean;
@@ -1502,7 +1502,7 @@ function NewCustomerModal({
     name: string;
     email: string;
     phone: string;
-    age: string;
+    dateOfBirth: string;
     gender: Gender;
   }) => void;
   onClose: () => void;
@@ -1541,17 +1541,18 @@ function NewCustomerModal({
           onChange={(event) => onChange({ ...value, phone: event.target.value })}
           placeholder="+971 50 000 0000"
         />
-        <div className="pls-form-grid">
+        <div className="pls-new-member-fields">
           <div>
-            <FieldLabel label="Age" />
+            <div className="pls-field-label"><label htmlFor="new-member-birth-date">Date of birth</label></div>
             <input
+              id="new-member-birth-date"
               className="pls-input"
-              inputMode="numeric"
-              value={value.age}
+              type="date"
+              max={new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date())}
+              value={value.dateOfBirth}
               onChange={(event) =>
-                onChange({ ...value, age: event.target.value })
+                onChange({ ...value, dateOfBirth: event.target.value })
               }
-              placeholder="32"
             />
           </div>
           <div>
