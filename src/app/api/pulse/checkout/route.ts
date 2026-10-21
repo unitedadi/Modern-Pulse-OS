@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { backendError, backendUrl, readJson, resolvePartnerContext } from "../backend";
+import { backendError, backendUrl, readJson, resolvePartnerContext, sellerUrl } from "../backend";
 
 type CheckoutProduct = {
   productId?: unknown;
@@ -53,6 +53,24 @@ export async function POST(request: Request) {
   }
 
   const sellerId = resolved.context.seller_id;
+  const supplementItems = new Map<string, { product_id: string; qty: number }>();
+  if (verticals.has("Supplements")) {
+    const catalogResponse = await fetch(sellerUrl(sellerId, "/catalog"), {
+      headers: { Accept: "application/json" }, cache: "no-store",
+    });
+    const catalog = await readJson(catalogResponse) as { products?: { supplements?: Array<{ product_id: string }> } } | null;
+    if (!catalogResponse.ok) {
+      return NextResponse.json({ error: "supplement_catalog_unavailable" }, { status: 502 });
+    }
+    const allowed = new Set((catalog?.products?.supplements ?? []).map((product) => product.product_id));
+    if (products.some((product) => !allowed.has(stringValue(product.productId)))) {
+      return NextResponse.json({ error: "supplement_not_available_for_seller" }, { status: 400 });
+    }
+    for (const product of products) {
+      const id = stringValue(product.productId);
+      supplementItems.set(id, { product_id: id, qty: (supplementItems.get(id)?.qty ?? 0) + 1 });
+    }
+  }
   const response = await fetch(backendUrl("/checkout/intents"), {
     method: "POST",
     headers: {
@@ -65,8 +83,8 @@ export async function POST(request: Request) {
       customer_id: customerId,
       checkout_mode: "ASSISTED_CHECKOUT",
       checkout_surface: "ASSISTED_FLOW",
-      start_step: "members",
-      cart: { items },
+      start_step: verticals.has("Supplements") ? "addresses" : "members",
+      cart: { items: verticals.has("Supplements") ? [...supplementItems.values()] : items },
       edit_policy: {
         members: "editable",
         addresses: "editable",

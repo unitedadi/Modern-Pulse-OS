@@ -10,6 +10,7 @@ type BackendLedgerEntry = {
   paid_amount_fils?: number | null;
   commission_fils?: number | null;
   paid_at?: string | null;
+  attribution_source?: string | null;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -54,9 +55,9 @@ function entryToView(entry: BackendLedgerEntry, index: number) {
     date: formatDate(entry.paid_at),
     desc: entry.product ?? "Product",
     customer: entry.customer_name ?? "Customer",
-    type: typeLabel(entry.vertical),
+    type: entry.attribution_source === "pulse_supplement" ? "Supplement sale" : typeLabel(entry.vertical),
     amount: `+ AED ${formatAed(commission)}`,
-    kind: kind(entry.vertical),
+    kind: entry.attribution_source === "pulse_supplement" ? "sale" : kind(entry.vertical),
   };
 }
 

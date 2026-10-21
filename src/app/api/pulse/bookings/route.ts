@@ -53,7 +53,8 @@ function bookingToView(booking: BackendBooking, index: number) {
     type: booking.type ?? "booking",
     customer: booking.customer_name ?? "Customer",
     service: serviceName(booking),
-    vertical: vertical(booking.vertical),
+    vertical: booking.type === "peptide_medication_order" ? "Peptides"
+      : booking.type === "supplement_order" ? "Supplements" : vertical(booking.vertical),
     date: formatDate(booking.occurred_at ?? booking.paid_at),
     status: status(booking.status),
     amount: amount > 0 ? `AED ${amount.toLocaleString()}` : "Consult",

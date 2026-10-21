@@ -19,7 +19,7 @@ import {
 
 type View = "customers" | "bookings" | "revenue" | "settings";
 type Gender = "Female" | "Male";
-type OrderTab = "lab" | "iv" | "peptides";
+type OrderTab = "lab" | "iv" | "peptides" | "supplements";
 type BookingFilter = "All" | Booking["vertical"];
 
 type CustomerMember = {
@@ -55,7 +55,7 @@ type Booking = {
   type?: "booking" | "peptide_consultation" | "peptide_medication_order" | string;
   customer: string;
   service: string;
-  vertical: "Lab" | "IV" | "Peptides";
+  vertical: "Lab" | "IV" | "Peptides" | "Supplements";
   date: string;
   status: "Confirmed" | "Pending" | "Completed";
   amount: string;
@@ -77,7 +77,9 @@ type Product = {
   name: string;
   desc: string;
   price: number;
-  vertical: "Lab" | "IV";
+  vertical: "Lab" | "IV" | "Supplements";
+  commission?: number;
+  overview?: string;
   productType?: "PACKAGE";
   fasting?: boolean;
   tat?: string;
@@ -379,6 +381,7 @@ export default function Home() {
   const [signingOut, setSigningOut] = useState(false);
   const [liveLabProducts, setLiveLabProducts] = useState<Product[]>([]);
   const [liveIvProducts, setLiveIvProducts] = useState<Product[]>([]);
+  const [liveSupplementProducts, setLiveSupplementProducts] = useState<Product[]>([]);
   const [servesPremise, setServesPremise] = useState(true);
   const [premiseAddress, setPremiseAddress] = useState<PremiseAddress>(emptyPremiseAddress);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -523,6 +526,7 @@ export default function Home() {
         setCustomers(customersPayload.customers ?? []);
         setLiveLabProducts(catalogPayload.labProducts ?? []);
         setLiveIvProducts(catalogPayload.ivProducts ?? []);
+        setLiveSupplementProducts(catalogPayload.supplementProducts ?? []);
         setBookings(bookingsPayload.bookings ?? []);
         setLedger(ledgerPayload.ledger ?? []);
         setLedgerTotals(ledgerPayload.totals ?? { paidAed: 0, commissionAed: 0 });
@@ -751,7 +755,7 @@ export default function Home() {
   async function confirmOrder() {
     if (!orderCustomer || cart.length === 0 || openingCheckout) return;
     if (new Set(cart.map((item) => item.vertical)).size > 1) {
-      flash("Lab and IV cannot be added in the same cart.");
+      flash("Please order each service category separately.");
       return;
     }
     const checkoutWindow = window.open("", "_blank");
@@ -852,7 +856,7 @@ export default function Home() {
     (product) => product.vertical === "Lab" && product.productType === "PACKAGE",
   );
   const displayIvProducts = liveIvProducts.length ? liveIvProducts : ivProducts;
-  const activeProductCount = orderTab === "lab" ? displayLabProducts.length : orderTab === "iv" ? displayIvProducts.length : 0;
+  const activeProductCount = orderTab === "lab" ? displayLabProducts.length : orderTab === "iv" ? displayIvProducts.length : orderTab === "supplements" ? liveSupplementProducts.length : 0;
 
   return (
     <main className="pls-app">
@@ -930,6 +934,7 @@ export default function Home() {
           cartTotal={cartTotal}
           labProducts={displayLabProducts}
           ivProducts={displayIvProducts}
+          supplementProducts={liveSupplementProducts}
           search={orderSearch}
           activeProductCount={activeProductCount}
           cartVertical={cartVertical}
@@ -938,7 +943,7 @@ export default function Home() {
           onOpenDetail={setDetailProduct}
           onAdd={(product) => {
             if (cartVertical && product.vertical !== cartVertical) {
-              flash("Lab and IV cannot be added in the same cart.");
+              flash("Please order each service category separately.");
               return;
             }
             setCart((current) => [...current, product]);
@@ -974,7 +979,7 @@ export default function Home() {
           onClose={() => setDetailProduct(null)}
           onAdd={() => {
             if (cartVertical && detailProduct.vertical !== cartVertical) {
-              flash("Lab and IV cannot be added in the same cart.");
+              flash("Please order each service category separately.");
               return;
             }
             setCart((current) => [...current, detailProduct]);
@@ -1167,7 +1172,7 @@ function BookingsView({
   const [filter, setFilter] = useState<BookingFilter>("All");
   const filteredBookings =
     filter === "All" ? bookings : bookings.filter((booking) => booking.vertical === filter);
-  const filterOptions: BookingFilter[] = ["All", "Lab", "IV", "Peptides"];
+  const filterOptions: BookingFilter[] = ["All", "Lab", "IV", "Peptides", ...(bookings.some((booking) => booking.vertical === "Supplements") ? ["Supplements" as const] : [])];
 
   return (
     <>
@@ -1601,6 +1606,7 @@ function OrderModal({
   cartTotal,
   labProducts,
   ivProducts,
+  supplementProducts,
   search,
   activeProductCount,
   cartVertical,
@@ -1634,6 +1640,7 @@ function OrderModal({
   cartTotal: number;
   labProducts: Product[];
   ivProducts: Product[];
+  supplementProducts: Product[];
   search: string;
   activeProductCount: number;
   cartVertical: Product["vertical"] | null;
@@ -1668,14 +1675,16 @@ function OrderModal({
       : products;
   const filteredLabProducts = filterProducts(labProducts);
   const filteredIvProducts = filterProducts(ivProducts);
+  const filteredSupplementProducts = filterProducts(supplementProducts);
   const resultCount =
-    tab === "lab" ? filteredLabProducts.length : tab === "iv" ? filteredIvProducts.length : 0;
+    tab === "lab" ? filteredLabProducts.length : tab === "iv" ? filteredIvProducts.length : tab === "supplements" ? filteredSupplementProducts.length : 0;
+  const selectedVertical = showLab ? "Lab" : showIv ? "IV" : tab === "supplements" ? "Supplements" : null;
   const lockedOutVertical =
-    cartVertical && ((showLab && cartVertical !== "Lab") || (showIv && cartVertical !== "IV"))
+    cartVertical && selectedVertical && cartVertical !== selectedVertical
       ? cartVertical
       : null;
   const addDisabledReason = lockedOutVertical
-    ? `Remove ${lockedOutVertical} items before adding ${lockedOutVertical === "Lab" ? "IV" : "Lab"}.`
+    ? `Remove ${lockedOutVertical} items before adding ${selectedVertical}.`
     : "";
   const peptideSlotGroups = useMemo(() => {
     const groups = new Map<string, PeptideConsultSlot[]>();
@@ -1715,7 +1724,7 @@ function OrderModal({
       </div>
       <div className="pls-order-body">
         <div className="pls-tabs">
-          {(["lab", "iv", "peptides"] as const).map((item) => (
+          {(["lab", "iv", "peptides", ...(supplementProducts.length ? ["supplements" as const] : [])] as const).map((item) => (
             <button
               className={tab === item ? "active" : ""}
               key={item}
@@ -1725,7 +1734,7 @@ function OrderModal({
                 ? "IV"
                 : item === "lab"
                   ? "Lab"
-                  : "Peptides"}
+                  : item === "peptides" ? "Peptides" : "Supplements"}
             </button>
           ))}
         </div>
@@ -1738,7 +1747,7 @@ function OrderModal({
                 <input
                   value={search}
                   onChange={(event) => onSearch(event.target.value)}
-                  placeholder={`Search ${activeProductCount.toLocaleString()} ${tab === "lab" ? "lab packages" : "IV therapies"}`}
+                  placeholder={`Search ${activeProductCount.toLocaleString()} ${tab === "lab" ? "lab packages" : tab === "iv" ? "IV therapies" : "supplements"}`}
                 />
                 {search && (
                   <button onClick={() => onSearch("")} aria-label="Clear product search">
@@ -1766,6 +1775,18 @@ function OrderModal({
                 products={filteredIvProducts}
                 resultCount={resultCount}
                 emptyCopy="No IV therapies match this search."
+                addDisabledReason={addDisabledReason}
+                onOpenDetail={onOpenDetail}
+                onAdd={onAdd}
+              />
+            )}
+
+            {tab === "supplements" && (
+              <ProductSection
+                title="Supplements"
+                products={filteredSupplementProducts}
+                resultCount={resultCount}
+                emptyCopy="No supplements match this search."
                 addDisabledReason={addDisabledReason}
                 onOpenDetail={onOpenDetail}
                 onAdd={onAdd}
@@ -1889,7 +1910,7 @@ function OrderModal({
                 </div>
               )}
               {cart.length === 0 ? (
-                <div className="pls-cart-empty">Add lab tests or IV therapy here.</div>
+                <div className="pls-cart-empty">Choose an item to start your order.</div>
               ) : (
                 <div className="pls-cart-list">
                   {cart.map((item, index) => (
@@ -1994,6 +2015,13 @@ function ProductDetailModal({
         />
       </div>
       <div className="pls-detail-body">
+        {product.vertical === "Supplements" && (
+          <div className="pls-detail-list">
+            {product.overview && <p>{product.overview}</p>}
+            <DetailRow label="Selling price" value={`AED ${product.price.toFixed(2)} incl. VAT`} />
+            <DetailRow label="Your commission (excl. VAT)" value={`AED ${(product.commission ?? 0).toFixed(2)}`} />
+          </div>
+        )}
         {product.pregnancy && (
           <div className="pls-warning">
             <AlertTriangle size={20} />

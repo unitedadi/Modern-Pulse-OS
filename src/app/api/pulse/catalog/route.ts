@@ -9,6 +9,7 @@ type BackendProduct = {
   type?: string | null;
   base_name?: string | null;
   price_aed_fils?: number | null;
+  commission_fils?: number | null;
   attributes_json?: Record<string, unknown> | null;
 };
 
@@ -136,6 +137,7 @@ export async function GET(request: Request) {
         products?: {
           laboratory?: BackendProduct[];
           iv_drips?: BackendProduct[];
+          supplements?: BackendProduct[];
         };
         peptide_consultation?: unknown;
         error?: string;
@@ -153,6 +155,19 @@ export async function GET(request: Request) {
   return NextResponse.json({
     labProducts: (payload?.products?.laboratory ?? []).filter(isLabPackage).map(labProduct),
     ivProducts: (payload?.products?.iv_drips ?? []).slice(0, 24).map(ivProduct),
+    supplementProducts: (payload?.products?.supplements ?? []).map((product) => {
+      const skin = objectValue(objectValue(product.attributes_json).skin);
+      return {
+        productId: product.product_id,
+        backendVerticalId: product.vertical_id,
+        name: product.name,
+        desc: stringValue(skin.size),
+        overview: stringValue(skin.subheadline),
+        price: Number(product.price_aed_fils ?? 0) / 100,
+        commission: Number(product.commission_fils ?? 0) / 100,
+        vertical: "Supplements" as const,
+      };
+    }),
     peptideConsultation: payload?.peptide_consultation ?? null,
   });
 }
