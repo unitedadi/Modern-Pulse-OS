@@ -80,7 +80,7 @@ type Product = {
   vertical: "Lab" | "IV" | "Supplements";
   commission?: number;
   overview?: string;
-  productType?: "PACKAGE";
+  productType?: "PACKAGE" | "ADDON";
   fasting?: boolean;
   tat?: string;
   sample?: string;
@@ -853,7 +853,7 @@ export default function Home() {
   const cartVertical = cart[0]?.vertical ?? null;
   const cartTotal = cart.reduce((sum, item) => sum + item.price, 0);
   const displayLabProducts = (liveLabProducts.length ? liveLabProducts : labProducts).filter(
-    (product) => product.vertical === "Lab" && product.productType === "PACKAGE",
+    (product) => product.vertical === "Lab" && (product.productType === "PACKAGE" || product.productType === "ADDON"),
   );
   const displayIvProducts = liveIvProducts.length ? liveIvProducts : ivProducts;
   const activeProductCount = orderTab === "lab" ? displayLabProducts.length : orderTab === "iv" ? displayIvProducts.length : orderTab === "supplements" ? liveSupplementProducts.length : 0;

@@ -10,13 +10,13 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function cartItem(product: CheckoutProduct) {
+function cartItem(product: CheckoutProduct, labKinds: Map<string, string>) {
   const productId = stringValue(product.productId);
   if (!productId) return null;
 
   if (product.vertical === "Lab") {
     return {
-      kind: "PACKAGE",
+      kind: labKinds.get(productId) === "ADDON" ? "BIOMARKER" : "PACKAGE",
       product_id: productId,
       addons: [],
     };
@@ -41,10 +41,10 @@ export async function POST(request: Request) {
 
   const customerId = stringValue(input?.customerId);
   const products = Array.isArray(input?.products) ? input.products : [];
-  const items = products.map(cartItem).filter((item): item is NonNullable<typeof item> => item !== null);
+  const labKinds = new Map<string, string>();
   const verticals = new Set(products.map((product) => stringValue(product.vertical)).filter(Boolean));
 
-  if (!customerId || !items.length) {
+  if (!customerId || !products.some((product) => stringValue(product.productId))) {
     return NextResponse.json({ error: "checkout_validation_error" }, { status: 400 });
   }
 
@@ -53,6 +53,22 @@ export async function POST(request: Request) {
   }
 
   const sellerId = resolved.context.seller_id;
+  if (verticals.has("Lab")) {
+    const catalogResponse = await fetch(sellerUrl(sellerId, "/catalog"), {
+      headers: { Accept: "application/json" }, cache: "no-store",
+    });
+    const catalog = await readJson(catalogResponse) as { products?: { laboratory?: Array<{
+      product_id: string; product_type?: string; type?: string; attributes_json?: { lab?: { kind?: string } };
+    }> } } | null;
+    if (!catalogResponse.ok) return NextResponse.json({ error: "lab_catalog_unavailable" }, { status: 502 });
+    for (const product of catalog?.products?.laboratory ?? []) {
+      const kind = String(product.product_type ?? product.type ?? product.attributes_json?.lab?.kind ?? "").toUpperCase();
+      if (kind === "PACKAGE" || kind === "ADDON") labKinds.set(product.product_id, kind);
+    }
+    if (products.some((product) => !labKinds.has(stringValue(product.productId)))) {
+      return NextResponse.json({ error: "lab_product_not_available_for_seller" }, { status: 400 });
+    }
+  }
   const supplementItems = new Map<string, { product_id: string; qty: number }>();
   if (verticals.has("Supplements")) {
     const catalogResponse = await fetch(sellerUrl(sellerId, "/catalog"), {
@@ -71,6 +87,7 @@ export async function POST(request: Request) {
       supplementItems.set(id, { product_id: id, qty: (supplementItems.get(id)?.qty ?? 0) + 1 });
     }
   }
+  const items = products.map((product) => cartItem(product, labKinds)).filter((item): item is NonNullable<typeof item> => item !== null);
   const response = await fetch(backendUrl("/checkout/intents"), {
     method: "POST",
     headers: {

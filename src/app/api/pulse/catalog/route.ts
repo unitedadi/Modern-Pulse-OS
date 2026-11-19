@@ -85,7 +85,7 @@ function labProduct(product: BackendProduct) {
     productId: product.product_id,
     backendVerticalId: product.vertical_id,
     name: product.name,
-    productType: "PACKAGE" as const,
+    productType: isLabPackage(product) ? "PACKAGE" as const : "ADDON" as const,
     desc: `${tat}. ${sample}.`,
     price,
     vertical: "Lab" as const,
@@ -153,7 +153,11 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    labProducts: (payload?.products?.laboratory ?? []).filter(isLabPackage).map(labProduct),
+    labProducts: (payload?.products?.laboratory ?? []).filter((product) => {
+      const attrs = objectValue(product.attributes_json);
+      const lab = objectValue(attrs.lab ?? attrs.Lab);
+      return ["PACKAGE", "ADDON"].includes(stringValue(product.product_type ?? product.type ?? lab.kind).toUpperCase());
+    }).map(labProduct),
     ivProducts: (payload?.products?.iv_drips ?? []).slice(0, 24).map(ivProduct),
     supplementProducts: (payload?.products?.supplements ?? []).map((product) => {
       const skin = objectValue(objectValue(product.attributes_json).skin);

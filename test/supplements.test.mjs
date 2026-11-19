@@ -4,7 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
-function fixture(route, { supplements = [], signedIn = true, catalogStatus = 200, bookings = [] } = {}) {
+function fixture(route, { supplements = [], signedIn = true, catalogStatus = 200, bookings = [], laboratory = [] } = {}) {
   const calls = [];
   const exports = {};
   const source = readFileSync(new URL(`../src/app/api/pulse/${route}/route.ts`, import.meta.url), "utf8");
@@ -23,7 +23,7 @@ function fixture(route, { supplements = [], signedIn = true, catalogStatus = 200
     },
     fetch: async (url, init) => {
       calls.push({ url, body: init.body && JSON.parse(init.body), cache: init.cache });
-      if (url.endsWith("/catalog")) return Response.json({ products: { supplements } }, { status: catalogStatus });
+      if (url.endsWith("/catalog")) return Response.json({ products: { supplements, laboratory } }, { status: catalogStatus });
       if (url.includes("/bookings?")) return Response.json({ items: bookings });
       if (url.includes("/ledger?")) return Response.json({ items: [{ product: "Jalupro Drink", vertical: "shipments", attribution_source: "pulse_supplement", commission_fils: 9505 }], totals: { commission_fils: 9505 } });
       assert.ok(url.endsWith("/checkout/intents"));
@@ -74,10 +74,10 @@ test("adding the same supplement twice produces one checkout item with quantity 
 });
 test("existing Lab and IV flows still start at member selection", async () => {
   for (const vertical of ["Lab", "IV"]) {
-    const f = fixture("checkout");
+    const f = fixture("checkout", { laboratory: [{ product_id: "existing", attributes_json: { lab: { kind: "PACKAGE" } } }] });
     assert.equal((await f.POST(req({ ...body, products: [{ productId: "existing", vertical }] }))).status, 200);
-    assert.equal(f.calls.length, 1);
-    assert.equal(f.calls[0].body.start_step, "members");
+    const checkout = f.calls.find(call => call.url.endsWith("/checkout/intents"));
+    assert.equal(checkout.body.start_step, "members");
   }
 });
 test("supplement orders and peptide medication orders retain distinct booking labels", async () => {
@@ -93,4 +93,30 @@ test("revenue shows Supplement sale and preserves fils", async () => {
   assert.equal(result.ledger[0].type, "Supplement sale");
   assert.equal(result.ledger[0].amount, "+ AED 95.05");
   assert.equal(result.totals.commissionAed, 95.05);
+});
+
+const labTests = [
+  ["LAB-ADDON-2026-440", "Urine Analysis", 6900],
+  ["LAB-ADDON-2026-154", "Culture & Examination - Urine", 13800],
+  ["LAB-ADDON-2026-400", "Stool Analysis", 6900],
+  ["LAB-ADDON-2026-152", "Culture & Examination - Stool", 13800],
+].map(([product_id, name, price_aed_fils]) => ({ product_id, name, vertical_id: "laboratory", price_aed_fils, attributes_json: { lab: { kind: "ADDON" } } }));
+test("all four assigned individual lab tests remain visible alongside packages", async () => {
+  const f = fixture("catalog", { laboratory: [...labTests, { product_id: "package", name: "Package", attributes_json: { lab: { kind: "PACKAGE" } } }] });
+  const result = await (await f.GET(new Request("https://pulse.invalid"))).json();
+  assert.equal(result.labProducts.length, 5);
+  assert.deepEqual(result.labProducts.slice(0, 4).map(p => [p.productId, p.name, p.price, p.productType]), labTests.map(p => [p.product_id, p.name, p.price_aed_fils / 100, "ADDON"]));
+});
+test("individual lab checkout uses BIOMARKER while packages retain PACKAGE, with server catalog authority", async () => {
+  const f = fixture("checkout", { laboratory: [...labTests, { product_id: "package", attributes_json: { lab: { kind: "PACKAGE" } } }] });
+  assert.equal((await f.POST(req({ customerId: "customer", products: [...labTests.map(p => ({ productId: p.product_id, vertical: "Lab", productType: "PACKAGE" })), { productId: "package", vertical: "Lab" }] }))).status, 200);
+  const checkout = f.calls.find(call => call.url.endsWith("/checkout/intents"));
+  assert.deepEqual(checkout.body.cart.items.map(p => p.kind), ["BIOMARKER", "BIOMARKER", "BIOMARKER", "BIOMARKER", "PACKAGE"]);
+});
+test("Lab checkout refuses unassigned products and unavailable catalog without creating an intent", async () => {
+  for (const options of [{ laboratory: labTests }, { catalogStatus: 503 }]) {
+    const f = fixture("checkout", options);
+    assert.ok((await f.POST(req({ customerId: "customer", products: [{ productId: "unassigned", vertical: "Lab" }] }))).status >= 400);
+    assert.equal(f.calls.some(call => call.url.endsWith("/checkout/intents")), false);
+  }
 });

@@ -21,11 +21,12 @@ function find(element, name) {
 }
 
 // Exercise the page's real event handlers with isolated hook state and no network writes.
-function fixture(members) {
+function fixture(members, labProducts = []) {
   const state = [];
   const requests = [];
   let cursor = 0;
   let loadMembers;
+  let loadCatalog;
   const exports = {};
   runInNewContext(compiled, {
     exports, Headers, URLSearchParams,
@@ -39,7 +40,7 @@ function fixture(members) {
         },
         useCallback: (fn) => fn,
         useMemo: (fn) => fn(),
-        useEffect: (fn, deps) => { if (deps?.includes("peptides")) loadMembers = fn; },
+        useEffect: (fn, deps) => { if (deps?.includes("peptides")) loadMembers = fn; if (deps?.includes(true)) loadCatalog = fn; },
       };
       if (name === "@clerk/nextjs") return {
         useAuth: () => ({ getToken: async () => "test-token", isLoaded: true, isSignedIn: true }),
@@ -48,7 +49,7 @@ function fixture(members) {
       return require(name);
     },
     fetch: async (url, init) => {
-      if (!init.body) return Response.json({ members, slots: [] });
+      if (!init.body) return Response.json({ members, slots: [], labProducts });
       requests.push({ url, body: JSON.parse(init.body) });
       return Response.json({ error: "slot_no_longer_available" }, { status: 409 });
     },
@@ -60,7 +61,7 @@ function fixture(members) {
     loadMembers();
     await new Promise(setImmediate);
   };
-  return { render, requests, openPeptides };
+  return { render, requests, openPeptides, loadCatalog: async () => { render(); loadCatalog(); await new Promise(setImmediate); } };
 }
 
 const customer = { id: "customer", name: "Account Holder", phone: "+971500000001", email: "test@example.com" };
@@ -115,4 +116,22 @@ test("new-customer form sends the entered birth date, not an inferred date from 
   assert.equal(requests[0].url, "/api/pulse/customers");
   assert.equal(requests[0].body.dateOfBirth, "1990-02-15");
   assert.equal(requests[0].body.age, undefined);
+});
+
+test("the rendered Lab picker includes all four individual tests, and adding one preserves its identity and price", async () => {
+  const products = [
+    ["LAB-ADDON-2026-440", "Urine Analysis", 69],
+    ["LAB-ADDON-2026-154", "Culture & Examination - Urine", 138],
+    ["LAB-ADDON-2026-400", "Stool Analysis", 69],
+    ["LAB-ADDON-2026-152", "Culture & Examination - Stool", 138],
+  ].map(([productId, name, price]) => ({ productId, name, price, productType: "ADDON", vertical: "Lab", desc: "Fixture" }));
+  const f = fixture([], products);
+  await f.loadCatalog();
+  find(f.render(), "CustomersView").props.onOpenCustomer(customer);
+  let modal = find(f.render(), "OrderModal").props;
+  assert.deepEqual(Array.from(modal.labProducts, p => p.productId), products.map(p => p.productId));
+  modal.onAdd(products[0]);
+  modal = find(f.render(), "OrderModal").props;
+  assert.equal(modal.cart[0].productId, products[0].productId);
+  assert.equal(modal.cartTotal, 69);
 });
